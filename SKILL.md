@@ -2,7 +2,7 @@
 name: td-rfb-atos
 description: Pipeline + base de pesquisa unificada para todos os atos da Receita Federal — Soluções de Consulta, Soluções de Divergência, Instruções Normativas, Decretos, Portarias, ADIs, Pareceres Normativos, etc. Modelo de dados unificado (atos + matérias + grafo de relações), análise estruturada por tema_específico via Haiku, embeddings via Gemini, mesma família arquitetural de td-carf.
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
   area_dona: tax-intelligence
   dominio: pesquisa-normativa
   responsavel: guga
@@ -55,6 +55,11 @@ Banco (Postgres ratio.rfb_atos.* — nuvem; ratio-pg-prod via SSM tunnel localho
   rfb_atos.conflito_temporal      ← pares de matérias com mesmo fato + sinais opostos (74k)
   rfb_atos.ato_alteracao_historico ← histórico de modificações por segmento
 
+  rfb_atos.ato_coleta             ← estado da coleta por ato (migration 010)
+                                    distingue "o portal não tem PDF" (fato) de
+                                    "nunca tentamos" e "tentamos e falhou" (defeitos)
+  rfb_atos.v_cobertura_ato        ← view do funil, uma linha por ato
+
   rfb_atos.taxonomia_*            ← lookups controlados (tributos, temas, setores, tipos_ato)
 
 Banco legado (Docker local, porta 5435): mantido como histórico operacional do pipeline
@@ -77,6 +82,10 @@ Retrieval (espelha td-carf):
 | `td:rfb-atos:buscar` | Busca simples: query + facetas → lista de hits |
 | `td:rfb-atos:pesquisar` | Deep research: planner + reflexão + relatório (espelha td:carf:pesquisar) |
 | `td:rfb-atos:stats` | Volumetria, frescor, cobertura (% com PDF, % categorizado, % embeddado) |
+| `td:rfb-atos:auditar` | **Revisão de cobertura** — funil ato→PDF→texto→matéria→embedding, defeitos D1-D8 e fila de trabalho. Somente leitura (`scripts/auditar_cobertura.py`) |
+| `td:rfb-atos:backfill` | **Coleta do que falta** — proba o portal e registra o resultado, separando "não tem PDF" de "nunca tentamos". Dry-run por padrão (`scripts/backfill_pdf.py`) |
+
+Runbook completo dos dois: [`docs/REVISAO-COBERTURA.md`](docs/REVISAO-COBERTURA.md).
 
 ## Vocabulário controlado
 
@@ -202,6 +211,17 @@ ANTHROPIC_API_KEY=sk-...                                 # categorização via H
 
 ## Status atual
 
+- v0.3.0 (2026-09-05) — **revisao de cobertura + coleta governada**
+  - `scripts/auditar_cobertura.py` (somente leitura): funil ato -> PDF -> texto ->
+    materia -> embedding, defeitos D1-D8, recorte por tipo/ano, holofote nos atos
+    nomeados no diagnostico do td-legislacao (D-19/D-20).
+  - `migrations/010_ato_coleta.sql`: `ato_coleta` (estado da coleta por ato),
+    `v_cobertura_ato` e o invariante `ato_analise_exige_conteudo` (NOT VALID).
+  - `scripts/backfill_pdf.py`: proba o portal e registra o resultado. Dry-run por
+    padrao; `--probe` confere o contrato antes de qualquer escrita.
+  - 46 testes contra Postgres real (`tests/`). Runbook em `docs/REVISAO-COBERTURA.md`.
+  - ⚠️ o contrato HTTP com o SIJUT ainda **nao** foi exercitado contra o portal --
+    rodar `--probe 5` antes do primeiro `--aplicar` em lote.
 - v0.2.0 (2026-05-11) — **base operacional, migrada para a nuvem `ratio.rfb_atos.*`**
   - 99.868 atos, 41.164 matérias com embedding OpenAI 3072 + sinal classificado (Haiku),
     888.132 segmentos temporais, 74.578 conflitos temporais, 142.812 ligações
