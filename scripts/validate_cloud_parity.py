@@ -15,7 +15,6 @@ Saída: relatório markdown em
 """
 from __future__ import annotations
 
-import asyncio
 import sys
 import time
 from pathlib import Path
@@ -155,7 +154,7 @@ def check_semantic_query(dst, report: list[str]):
     vec_lit = vector_literal(vec)
 
     with dst.cursor() as c:
-        c.execute(f"""
+        c.execute("""
             SELECT m.id, m.sinal, m.tema_macro, m.tema_especifico,
                    LEFT(m.ementa_trecho, 120) AS preview,
                    m.embedding <=> %s::halfvec AS distancia

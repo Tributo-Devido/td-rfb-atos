@@ -121,7 +121,7 @@ if __name__ == "__main__":
     # Smoke test
     dsn, mode = _resolve_dsn()
     print(f"DSN resolvido: modo={mode}")
-    print(f"             : (DSN não exibido por segurança)")
+    print("             : (DSN não exibido por segurança)")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT current_database(), current_schema, version()")
