@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+
+    # Os testes rodam contra Postgres de verdade, sem mock: o que estes scripts
+    # tem de dificil e SQL (FILTER, EXISTS correlacionado, NOT VALID, UPDATE ...
+    # FROM com CTE). Um mock validaria a montagem da string e deixaria passar
+    # exatamente a classe de erro que importa.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rfbtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install "psycopg[binary]" pytest ruff
+
+      - name: Lint
+        run: ruff check scripts/ tests/
+
+      - name: Testes
+        env:
+          PGTEST_DSN: postgresql://postgres:postgres@localhost:5432/rfbtest
+          # Sem isto a suite inteira se pula quando o banco nao responde e o CI
+          # reporta verde sem ter exercitado uma linha de SQL. Ver tests/conftest.py.
+          PGTEST_REQUIRED: "1"
+        run: pytest tests/ -q -rs

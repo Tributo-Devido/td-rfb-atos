@@ -1,0 +1,41 @@
+# Segredos -- NUNCA versionar.
+# O repo de origem (tdax-3.0) ja teve senha commitada e removida a posteriori
+# ("chore: remover senha do usuario tdax hardcoded do repo", #5). Segredo que
+# entra no git nao sai: some do HEAD e continua no historico.
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.p12
+ratio-pg-dsn.txt
+
+# Acervo baixado do portal -- 30k+ PDFs, ~GB. Fica em disco/S3, nao no git.
+scripts/pdfs/
+pdfs/
+*.pdf
+
+# Dumps do SIJUT (in2121_original.json tem 3,6 MB; outros idem)
+*_original.json
+
+# Saidas de execucao (relatorios de auditoria, CSVs)
+relatorio/
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Postgres de teste local
+pgdata/
+
+# SO / editor
+.DS_Store
+.idea/
+.vscode/
