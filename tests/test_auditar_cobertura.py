@@ -239,9 +239,8 @@ def test_auditoria_e_somente_leitura(base):
     sys.path.insert(0, str(RAIZ / "scripts"))
     import auditar_cobertura as ac
 
-    with ac.conectar(DSN) as conn:
-        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
-            conn.execute("UPDATE rfb_atos.ato SET ementa = 'x' WHERE id = 1")
+    with ac.conectar(DSN) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+        conn.execute("UPDATE rfb_atos.ato SET ementa = 'x' WHERE id = 1")
 
 
 def test_filtro_por_tipo_reduz_o_universo(base):

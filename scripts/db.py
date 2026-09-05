@@ -111,10 +111,9 @@ def get_legacy_conn() -> psycopg.Connection:
 @contextmanager
 def cursor():
     """Context manager: with cursor() as cur: ..."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            yield cur
-            conn.commit()
+    with get_conn() as conn, conn.cursor() as cur:
+        yield cur
+        conn.commit()
 
 
 if __name__ == "__main__":
@@ -122,18 +121,17 @@ if __name__ == "__main__":
     dsn, mode = _resolve_dsn()
     print(f"DSN resolvido: modo={mode}")
     print("             : (DSN não exibido por segurança)")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT current_database(), current_schema, version()")
-            db, schema, ver = cur.fetchone()
-            print(f"  Database: {db}")
-            print(f"  Schema:   {schema}")
-            print(f"  Version:  {ver.split(',')[0]}")
-            if mode == "cloud":
-                cur.execute("SELECT COUNT(*) FROM rfb_atos.ato")
-                n = cur.fetchone()[0]
-                print(f"  rfb_atos.ato count: {n}")
-            else:
-                cur.execute("SELECT COUNT(*) FROM atos")
-                n = cur.fetchone()[0]
-                print(f"  atos count: {n}")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT current_database(), current_schema, version()")
+        db, schema, ver = cur.fetchone()
+        print(f"  Database: {db}")
+        print(f"  Schema:   {schema}")
+        print(f"  Version:  {ver.split(',')[0]}")
+        if mode == "cloud":
+            cur.execute("SELECT COUNT(*) FROM rfb_atos.ato")
+            n = cur.fetchone()[0]
+            print(f"  rfb_atos.ato count: {n}")
+        else:
+            cur.execute("SELECT COUNT(*) FROM atos")
+            n = cur.fetchone()[0]
+            print(f"  atos count: {n}")

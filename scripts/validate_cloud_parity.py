@@ -23,7 +23,7 @@ import psycopg
 
 SCRIPTS_LIB = Path(r"c:/td-skills/td-creditos/scripts").resolve()
 sys.path.insert(0, str(SCRIPTS_LIB))
-from lib.embed_openai import embed_texts_sync, vector_literal  # noqa: E402
+from lib.embed_openai import embed_texts_sync, vector_literal
 
 
 DOCKER_DSN = "postgresql://td:td@localhost:5435/td_rfb_atos"

@@ -19,7 +19,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "scripts"))
 
 pytest.importorskip("psycopg")
-import backfill_pdf as bf  # noqa: E402
+import backfill_pdf as bf
 
 DSN = os.environ.get("PGTEST_DSN") or os.environ.get("RFB_ATOS_DSN")
 PDF = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"
@@ -27,8 +27,9 @@ HTML = b"<!DOCTYPE html><html><body>Consulta SIJUT</body></html>"
 
 
 def alvo(**kw) -> bf.Alvo:
-    base = dict(ato_id=1, tipo_ato="INSTRUCAO_NORMATIVA", numero="2121", ano=2022,
-                url_pdf=None, url_html=None, link=None, id_portal=None)
+    base = {"ato_id": 1, "tipo_ato": "INSTRUCAO_NORMATIVA", "numero": "2121",
+            "ano": 2022, "url_pdf": None, "url_html": None, "link": None,
+            "id_portal": None}
     return bf.Alvo(**{**base, **kw})
 
 
@@ -188,7 +189,7 @@ def conn():
 def args(**kw):
     from argparse import Namespace
 
-    base = dict(limite=500, ato=None, tipo=None, ano_min=None)
+    base = {"limite": 500, "ato": None, "tipo": None, "ano_min": None}
     return Namespace(**{**base, **kw})
 
 

@@ -36,7 +36,10 @@ jobs:
           python-version: "3.11"
 
       - name: Instalar dependencias
-        run: pip install "psycopg[binary]" pytest ruff
+        # Versoes fixas de proposito. O primeiro run deste CI reprovou com 20
+        # achados de lint que o mesmo comando nao reportava localmente; com o
+        # pin e o pyproject.toml, `ruff check` diz a mesma coisa nos dois lados.
+        run: pip install "psycopg[binary]==3.3.5" "pytest==9.1.1" "ruff==0.15.8"
 
       - name: Lint
         run: ruff check scripts/ tests/

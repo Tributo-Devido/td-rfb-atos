@@ -507,7 +507,7 @@ def montar_relatorio(conn, esq: Schema, args) -> tuple[str, dict[str, list]]:
         resumo.append([d.codigo, d.titulo, num(n), d.acao])
         detalhe.append((d, n))
     L += tabela_md(["#", "defeito", "atos", "acao"], resumo)
-    csvs["defeitos"] = [["codigo", "defeito", "atos", "acao"]] + resumo
+    csvs["defeitos"] = [["codigo", "defeito", "atos", "acao"], *resumo]
     L.append("")
 
     for d, n in detalhe:
@@ -566,7 +566,7 @@ def montar_relatorio(conn, esq: Schema, args) -> tuple[str, dict[str, list]]:
     # ---- Foco
     ids = ([int(x) for x in args.foco.split(",") if x.strip()]
            if args.foco else [i for i, _ in FOCO_PADRAO])
-    notas = dict((i, txt) for i, txt in FOCO_PADRAO)
+    notas = dict(FOCO_PADRAO)
     linhas_foco = foco(conn, esq, ids)
     secao += 1
     L.append(f"## {secao}. Atos nomeados no diagnostico")
@@ -577,7 +577,7 @@ def montar_relatorio(conn, esq: Schema, args) -> tuple[str, dict[str, list]]:
         L += tabela_md(
             ["ato_id", "tipo", "numero", "ano", "status", "content_disp",
              "analise_compl", "tem texto", "materias", "embeddado", "nota"],
-            [list(r) + [notas.get(r[0], "")] for r in linhas_foco],
+            [[*r, notas.get(r[0], "")] for r in linhas_foco],
         )
         csvs["foco"] = [
             ["ato_id", "tipo_ato", "numero", "ano", "status_vigencia",

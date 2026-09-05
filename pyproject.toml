@@ -1,0 +1,49 @@
+# Configuracao unica do ruff.
+#
+# Existe porque o primeiro run do CI reprovou com 20 achados (I001, RUF100,
+# SIM117, C408) que o mesmo ruff, mesma versao, nao reportava localmente: sem
+# arquivo de configuracao no repo, o conjunto de regras vira um default que
+# muda por conta propria, e o build passa a depender de onde rodou. Com o select
+# explicito abaixo, a regra e uma decisao versionada -- e `ruff check` diz a
+# mesma coisa na maquina do analista e no runner.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "W",    # avisos do pycodestyle
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplificacoes
+    "UP",   # sintaxe moderna
+    "RUF",  # regras do proprio ruff
+]
+
+# `I` (ordenacao de imports) fica DE FORA de proposito. Tres scripts fazem
+# `sys.path.insert(...)` e so entao importam de `lib.embed_openai` -- a ordem e o
+# que faz o import funcionar. O isort moveria esse import para cima e quebraria
+# os tres em silencio, trocando um problema de estilo por um bug de runtime.
+
+[tool.ruff.lint.per-file-ignores]
+# Os tres scripts do path-hack acima. E402 (import fora do topo) e intencional:
+# o import so funciona depois do sys.path.insert.
+"scripts/reembed_cloud.py" = ["E402"]
+"tests/test_backfill_pdf.py" = ["E402"]
+
+# DIVIDA DECLARADA -- scripts de ETL herdados do tdax-3.0.
+#
+# Sao os unicos arquivos do repo sem teste nenhum: rodar qualquer um deles exige
+# o Docker local na 5435 E a nuvem pelo tunnel SSM ao mesmo tempo. Reformatar 18
+# linhas longas e mexer em desempacotamento de tupla neles, sem nada que pegue um
+# erro de digitacao, e risco sem contrapartida -- um caractere fora do lugar numa
+# lista de colunas de INSERT vira dado errado em producao, nao vira build vermelho.
+#
+# Ficam nas regras de correcao (E, F, W, B, SIM, UP) e dispensados das cosmeticas.
+# Quando ganharem teste, tirar daqui.
+"scripts/migrate_to_cloud.py" = ["E501", "RUF059"]
+"scripts/validate_cloud_parity.py" = ["E402", "E501", "C416"]
+"scripts/db.py" = ["SIM105"]

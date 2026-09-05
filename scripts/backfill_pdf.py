@@ -202,7 +202,7 @@ def backoff_s(tentativa: int) -> float:
 def buscar(url: str, sessao) -> Resultado:
     try:
         resp = sessao.get(url, timeout=TIMEOUT_S, allow_redirects=True)
-    except Exception as exc:  # noqa: BLE001 -- qualquer falha de rede e a mesma classe aqui
+    except Exception as exc:
         return Resultado("erro_rede", erro=f"{type(exc).__name__}: {exc}"[:500])
     return classificar_resposta(
         resp.status_code, resp.headers.get("Content-Type"), resp.content
