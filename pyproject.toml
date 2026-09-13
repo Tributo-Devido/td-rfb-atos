@@ -47,3 +47,41 @@ select = [
 "scripts/migrate_to_cloud.py" = ["E501", "RUF059"]
 "scripts/validate_cloud_parity.py" = ["E402", "E501", "C416"]
 "scripts/db.py" = ["SIM105"]
+
+# DIVIDA DECLARADA -- pipeline de coleta vindo de C:\td-skills\td-rfb-atos (12/09/2026).
+#
+# Mesmo argumento do bloco acima, com mais peso: sao 26 scripts sem teste nenhum, que
+# falam com o SIJUT, com a API da Anthropic e com o Postgres local. No dia em que
+# entraram no git o ruff apontou 304 achados -- 192 linhas longas, `import; chamada()`
+# na mesma linha, imports sem uso -- e NENHUM de nome indefinido ou bug (F821, B).
+# Corrigir 304 pontos a mao sem teste troca estilo por risco.
+#
+# Cada arquivo dispensa so os codigos que tinha naquele dia: codigo novo que
+# introduza outra classe de achado continua reprovando. Quando um script ganhar
+# teste, limpar e tirar daqui.
+"scripts/backfill_normalize.py" = ["E501", "E701", "F401"]
+"scripts/categorize_batch.py" = ["E501", "F401", "F541", "SIM108", "SIM117", "UP035"]
+"scripts/categorize_with_llm.py" = ["E501"]
+"scripts/classificar_sinal_haiku.py" = ["E501", "F541", "SIM117"]
+"scripts/compilar_estudo_combustiveis.py" = ["E402", "E501", "E702", "F401", "SIM117"]
+"scripts/compilar_estudo_transporte.py" = ["E402", "E501", "E701", "E702", "SIM117"]
+"scripts/deep_research_combustiveis.py" = ["E402", "E501", "E702", "F401", "SIM117"]
+"scripts/deep_research_transporte.py" = ["E402", "E501", "E702"]
+"scripts/detectar_conflitos.py" = ["E402", "E501", "E702", "F541"]
+"scripts/discover_api.py" = ["E501"]
+"scripts/download_pdf.py" = ["E501", "F401"]
+"scripts/embed_chunks.py" = ["E501", "F401", "RUF005", "UP035"]
+"scripts/extract_content.py" = ["E501"]
+"scripts/extract_segmentos.py" = ["E501", "E702", "F401", "SIM108"]
+"scripts/extract_sijut.py" = ["E501", "F401", "SIM108", "SIM117", "UP035"]
+"scripts/fetch_normasinternet2.py" = ["E501", "F401"]
+"scripts/find_pdf_endpoint.py" = ["E501"]
+"scripts/migrate_segmento_fast.py" = ["E501", "F401", "F841", "SIM117"]
+"scripts/normalize.py" = ["E501", "UP045"]
+"scripts/patch_segmento_gap.py" = ["F401"]
+"scripts/retrieve.py" = ["E501", "E701", "RUF005", "SIM117"]
+"scripts/run_pipeline.py" = ["E501", "RUF005"]
+"scripts/seed_taxonomia.py" = ["E501", "SIM117"]
+"scripts/sintese_estudos.py" = ["E402", "E501", "E702"]
+"scripts/stats.py" = ["E501", "SIM117"]
+"scripts/timeline.py" = ["C401", "E402", "E501", "E702", "SIM117"]

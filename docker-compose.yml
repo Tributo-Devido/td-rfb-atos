@@ -1,0 +1,33 @@
+# Postgres local para td-rfb-atos (atos normativos da Receita Federal).
+#
+# Uso:
+#   docker compose up -d
+#   PG_DSN='postgresql://td:<<PG_PASSWORD>>@localhost:5435/td_rfb_atos' py scripts/run_pipeline.py
+#   docker compose down
+#
+# Porta 5435 — escolhida para nao colidir com:
+#   - PG do sistema (5432)
+#   - td-compliance (5433)
+#   - td-os (5434)
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: td-rfb-atos-pg
+    environment:
+      POSTGRES_USER: td
+      POSTGRES_PASSWORD: td
+      POSTGRES_DB: td_rfb_atos
+    ports:
+      - "5435:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U td -d td_rfb_atos"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

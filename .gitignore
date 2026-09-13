@@ -18,9 +18,17 @@ pdfs/
 # Dumps do SIJUT (in2121_original.json tem 3,6 MB; outros idem)
 *_original.json
 
-# Saidas de execucao (relatorios de auditoria, CSVs)
+# Saidas de execucao (relatorios de auditoria, CSVs) e os estudos em outputs/wip/,
+# que ainda nao sao versionados (ver README, "Dados fora do git")
 relatorio/
 outputs/
+
+# Dados de execucao do pipeline -- lotes Anthropic (4,6 GB), resultados e logs.
+# Moram em C:\td-rfb-atos-dados, fora do repo.
+batches/
+logs/
+*.jsonl
+*.batch_id
 
 # Python
 __pycache__/

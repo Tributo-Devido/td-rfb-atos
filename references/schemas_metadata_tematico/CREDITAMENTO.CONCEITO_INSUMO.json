@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Schema metadata_tematico para CREDITAMENTO.CONCEITO_INSUMO",
+  "description": "Aplicado quando ato_materia.tema_especifico = 'CREDITAMENTO.CONCEITO_INSUMO'. Captura aplicação dos critérios de essencialidade e relevância (Tema 779 STJ).",
+  "type": "object",
+  "required": ["natureza_dispendio", "decisao_creditamento"],
+  "properties": {
+    "natureza_dispendio": {
+      "type": "string",
+      "description": "Natureza do dispêndio em análise (descrição livre)",
+      "examples": ["Frete na transferência de produtos acabados entre estabelecimentos da mesma empresa", "EPIs fornecidos a empregados da fase agrícola"]
+    },
+    "atividade_contribuinte": {
+      "type": ["string", "null"],
+      "description": "Atividade econômica do contribuinte (livre, mas vincula ao tema)"
+    },
+    "regime": {
+      "type": "string",
+      "enum": ["nao_cumulativo_pis", "nao_cumulativo_cofins", "nao_cumulativo_pis_cofins", "nao_cumulativo_pis_importacao", "nao_cumulativo_cofins_importacao", "nao_aplicavel"]
+    },
+    "decisao_creditamento": {
+      "type": "string",
+      "enum": ["aceito_essencial", "aceito_relevante", "negado_nao_essencial", "negado_nao_relevante", "negado_dispositivo_expresso", "aceito_parcial", "diligencia"],
+      "description": "Resultado: como a essencialidade/relevância foi analisada"
+    },
+    "criterio_aplicado": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["essencialidade", "relevancia", "imprescindibilidade", "subtracao_hipotetica", "relacao_processo_produtivo", "imposicao_legal_externa", "vedacao_expressa"] }
+    },
+    "fundamento_normativo": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Normas-base citadas (Lei 10.637, Lei 10.833, IN 2.121, Tema 779 STJ, REsp 1.221.170)",
+      "examples": [["Lei 10.833/2003 art. 3º II", "IN RFB 2.121/2022 art. 175"]]
+    },
+    "vedacao_expressa_aplicada": {
+      "type": ["boolean", "null"],
+      "description": "Se houve vedação expressa em norma (ex: aquisição de pessoa física, alíquota zero)"
+    },
+    "tema_stj_779_invocado": {
+      "type": "boolean",
+      "description": "Se a decisão invocou expressamente o Tema 779 STJ (REsp 1.221.170)"
+    }
+  },
+  "additionalProperties": false
+}

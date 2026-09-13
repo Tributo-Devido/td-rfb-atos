@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Schema metadata_tematico para IRPJ_CSLL.AMORTIZACAO_AGIO",
+  "description": "Aplicado quando ato_materia.tema_especifico = 'IRPJ_CSLL.AMORTIZACAO_AGIO'. Captura a estrutura típica de operação societária (incorporação/fusão/cisão) que gerou ágio amortizável.",
+  "type": "object",
+  "required": ["operacao_societaria", "fundamento_economico_agio"],
+  "properties": {
+    "operacao_societaria": {
+      "type": "string",
+      "enum": ["incorporacao_direta", "incorporacao_reversa", "fusao", "cisao", "incorporacao_acoes", "permuta_acoes", "drop_down", "operacao_outras"]
+    },
+    "fundamento_economico_agio": {
+      "type": "string",
+      "enum": ["rentabilidade_futura", "valor_de_mercado_intangivel", "ativos_diferenca_valor_contabil", "fundo_comercio", "carteira_clientes", "marca", "outros"],
+      "description": "Justificativa econômica registrada para o ágio"
+    },
+    "uso_de_empresa_veiculo": {
+      "type": ["boolean", "null"],
+      "description": "Se houve interposição de empresa veículo (caso comum de glosa pré-Lei 12.973/2014)"
+    },
+    "data_operacao": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Data da operação geradora do ágio (relevante para regime: até 31/12/2014 = Lei 9.532/97; após = Lei 12.973/2014)"
+    },
+    "regime_legal_aplicavel": {
+      "type": "string",
+      "enum": ["lei_9532_1997", "lei_12973_2014", "transicao_rtt", "indefinido"]
+    },
+    "amortizacao_aceita": {
+      "type": "string",
+      "enum": ["aceita_integral", "aceita_parcial", "negada_empresa_veiculo", "negada_ausencia_proposito_negocial", "negada_sem_laudo_rentabilidade", "negada_grupo_economico_originario"]
+    },
+    "valor_agio_amortizado": {
+      "type": ["number", "null"],
+      "description": "Valor do ágio em discussão (R$)"
+    },
+    "laudo_rentabilidade_apresentado": {
+      "type": ["boolean", "null"],
+      "description": "Se foi apresentado laudo técnico que justifique a rentabilidade futura"
+    }
+  },
+  "additionalProperties": false
+}

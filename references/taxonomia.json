@@ -1,0 +1,436 @@
+{
+  "_versao": "1.0",
+  "_descricao": "Taxonomia controlada para td-rfb-atos. Porte do CARF (taxonomia_controlada_v1) com adições para Soluções de Consulta, Soluções de Divergência, Instruções Normativas, Decretos, Portarias, ADIs e demais atos normativos da Receita Federal.",
+  "_regra_geral": "Use APENAS os códigos e valores listados. Se nada se aplicar, use mecanismo '__NOVO_*'.",
+  "_aplicavel_a": ["acordao_carf", "solucao_consulta", "solucao_divergencia", "instrucao_normativa", "decreto", "portaria", "ato_declaratorio_interpretativo", "ato_declaratorio_executivo", "ato_declaratorio_normativo", "parecer_normativo", "nota_tecnica", "resolucao", "ordem_servico"],
+
+  "tipos_ato": {
+    "_instrucao": "Tipo do ato normativo. Usado em atos.tipo_ato.",
+    "lista": [
+      { "codigo": "ACORDAO_CARF", "nome": "Acórdão do CARF", "sigla": "Acórdão", "sijut_value": null, "eficacia_default": "inter_partes" },
+      { "codigo": "SOLUCAO_CONSULTA", "nome": "Solução de Consulta", "sigla": "SC", "sijut_value": 72, "eficacia_default": "vinculante_local" },
+      { "codigo": "SOLUCAO_CONSULTA_INTERNA", "nome": "Solução de Consulta Interna", "sigla": "SCI", "sijut_value": 75, "eficacia_default": "vinculante_geral" },
+      { "codigo": "SOLUCAO_DIVERGENCIA", "nome": "Solução de Divergência", "sigla": "SD", "sijut_value": 73, "eficacia_default": "vinculante_geral" },
+      { "codigo": "INSTRUCAO_NORMATIVA", "nome": "Instrução Normativa", "sigla": "IN", "sijut_value": 42, "eficacia_default": "vinculante_geral" },
+      { "codigo": "INSTRUCAO_NORMATIVA_CONJUNTA", "nome": "Instrução Normativa Conjunta", "sigla": "IN Conj.", "sijut_value": 79, "eficacia_default": "vinculante_geral" },
+      { "codigo": "DECRETO", "nome": "Decreto", "sigla": "Decreto", "sijut_value": null, "eficacia_default": "vinculante_geral" },
+      { "codigo": "PORTARIA", "nome": "Portaria", "sigla": "Port.", "sijut_value": 57, "eficacia_default": "vinculante_geral" },
+      { "codigo": "PORTARIA_CONJUNTA", "nome": "Portaria Conjunta", "sigla": "Port. Conj.", "sijut_value": 81, "eficacia_default": "vinculante_geral" },
+      { "codigo": "PORTARIA_NORMATIVA", "nome": "Portaria Normativa", "sigla": "Port. Norm.", "sijut_value": 65, "eficacia_default": "vinculante_geral" },
+      { "codigo": "PORTARIA_INTERMINISTERIAL", "nome": "Portaria Interministerial", "sigla": "PIM", "sijut_value": 80, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ATO_DECLARATORIO", "nome": "Ato Declaratório", "sigla": "AD", "sijut_value": 7, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ATO_DECLARATORIO_EXECUTIVO", "nome": "Ato Declaratório Executivo", "sigla": "ADE", "sijut_value": 9, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ATO_DECLARATORIO_EXECUTIVO_CONJUNTO", "nome": "Ato Declaratório Executivo Conjunto", "sigla": "ADE Conj.", "sijut_value": 82, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ATO_DECLARATORIO_INTERPRETATIVO", "nome": "Ato Declaratório Interpretativo", "sigla": "ADI", "sijut_value": 10, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ATO_DECLARATORIO_NORMATIVO", "nome": "Ato Declaratório Normativo", "sigla": "ADN", "sijut_value": 11, "eficacia_default": "vinculante_geral" },
+      { "codigo": "PARECER", "nome": "Parecer", "sigla": "Parec.", "sijut_value": 61, "eficacia_default": "orientativo" },
+      { "codigo": "PARECER_NORMATIVO", "nome": "Parecer Normativo", "sigla": "Parec. Norm.", "sijut_value": 59, "eficacia_default": "vinculante_geral" },
+      { "codigo": "NOTA", "nome": "Nota", "sigla": "Nota", "sijut_value": 77, "eficacia_default": "orientativo" },
+      { "codigo": "NOTA_TECNICA", "nome": "Nota Técnica", "sigla": "NT", "sijut_value": 76, "eficacia_default": "orientativo" },
+      { "codigo": "NOTA_CONJUNTA", "nome": "Nota Conjunta", "sigla": "Nota Conj.", "sijut_value": 97, "eficacia_default": "orientativo" },
+      { "codigo": "NOTA_TECNICA_CONJUNTA", "nome": "Nota Técnica Conjunta", "sigla": "NT Conj.", "sijut_value": 93, "eficacia_default": "orientativo" },
+      { "codigo": "NORMA_EXECUCAO", "nome": "Norma de Execução", "sigla": "NE", "sijut_value": 49, "eficacia_default": "vinculante_geral" },
+      { "codigo": "NORMA_EXECUCAO_CONJUNTA", "nome": "Norma de Execução Conjunta", "sigla": "NE Conj.", "sijut_value": 90, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ORDEM_SERVICO", "nome": "Ordem de Serviço", "sigla": "OS", "sijut_value": 56, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ORDEM_SERVICO_CONJUNTA", "nome": "Ordem de Serviço Conjunta", "sigla": "OS Conj.", "sijut_value": 92, "eficacia_default": "vinculante_geral" },
+      { "codigo": "RESOLUCAO", "nome": "Resolução", "sigla": "Resol.", "sijut_value": 67, "eficacia_default": "vinculante_geral" },
+      { "codigo": "ORIENTACAO_NORMATIVA", "nome": "Orientação Normativa", "sigla": "ON", "sijut_value": 54, "eficacia_default": "orientativo" },
+      { "codigo": "DECISAO", "nome": "Decisão", "sigla": "Decis.", "sijut_value": 30, "eficacia_default": "inter_partes" },
+      { "codigo": "DESPACHO", "nome": "Despacho", "sigla": "Desp.", "sijut_value": 35, "eficacia_default": "orientativo" },
+      { "codigo": "DESPACHO_DECISORIO", "nome": "Despacho Decisório", "sigla": "Desp. Decis.", "sijut_value": 83, "eficacia_default": "inter_partes" },
+      { "codigo": "RECOMENDACAO", "nome": "Recomendação", "sigla": "Recom.", "sijut_value": 66, "eficacia_default": "orientativo" },
+      { "codigo": "EXPOSICAO_MOTIVOS", "nome": "Exposição de Motivos", "sigla": "EM", "sijut_value": 39, "eficacia_default": "orientativo" },
+      { "codigo": "COMUNICADO", "nome": "Comunicado", "sigla": "Com.", "sijut_value": 23, "eficacia_default": "orientativo" },
+      { "codigo": "CONSULTA_PUBLICA", "nome": "Consulta Pública", "sigla": "CP", "sijut_value": 27, "eficacia_default": "orientativo" },
+      { "codigo": "EDITAL_INTIMACAO", "nome": "Edital de Intimação", "sigla": "Ed. Intim.", "sijut_value": 78, "eficacia_default": "orientativo" },
+      { "codigo": "EDITAL_TRANSACAO_ADESAO", "nome": "Edital de Transação por Adesão", "sigla": "ETA", "sijut_value": 96, "eficacia_default": "vinculante_geral" },
+      { "codigo": "TERMO_EXCLUSAO_SIMPLES", "nome": "Termo de Exclusão do Simples Nacional", "sigla": "TESN", "sijut_value": 94, "eficacia_default": "inter_partes" }
+    ]
+  },
+
+  "orgaos_emissores": {
+    "_instrucao": "Órgão emissor. Determina hierarquia e eficácia default. SRRF{NN} = Superintendência Regional da Receita Federal da N-ésima Região Fiscal.",
+    "lista": [
+      { "codigo": "RFB", "nome": "Receita Federal do Brasil (cúpula)", "hierarquia": 1, "eficacia_default": "vinculante_geral" },
+      { "codigo": "COSIT", "nome": "Coordenação-Geral de Tributação", "hierarquia": 2, "eficacia_default": "vinculante_geral" },
+      { "codigo": "COANA", "nome": "Coordenação-Geral de Administração Aduaneira", "hierarquia": 2, "eficacia_default": "vinculante_geral" },
+      { "codigo": "DISIT_SRRF01", "nome": "Disit/SRRF01 (Belém)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF02", "nome": "Disit/SRRF02 (Fortaleza)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF03", "nome": "Disit/SRRF03 (Recife)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF04", "nome": "Disit/SRRF04 (Salvador)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF05", "nome": "Disit/SRRF05 (Belo Horizonte)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF06", "nome": "Disit/SRRF06 (Rio de Janeiro)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF07", "nome": "Disit/SRRF07 (São Paulo)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF08", "nome": "Disit/SRRF08 (Curitiba)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF09", "nome": "Disit/SRRF09 (Porto Alegre)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DISIT_SRRF10", "nome": "Disit/SRRF10 (Campo Grande)", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF01", "nome": "Diana/SRRF01", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF02", "nome": "Diana/SRRF02", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF03", "nome": "Diana/SRRF03", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF04", "nome": "Diana/SRRF04", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF05", "nome": "Diana/SRRF05", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF06", "nome": "Diana/SRRF06", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF07", "nome": "Diana/SRRF07", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF08", "nome": "Diana/SRRF08", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF09", "nome": "Diana/SRRF09", "hierarquia": 3, "eficacia_default": "vinculante_local" },
+      { "codigo": "DIANA_SRRF10", "nome": "Diana/SRRF10", "hierarquia": 3, "eficacia_default": "vinculante_local" }
+    ]
+  },
+
+  "eficacia": {
+    "_instrucao": "Efeito vinculante do ato.",
+    "lista": [
+      { "codigo": "vinculante_geral", "nome": "Vinculante para toda a RFB e contribuintes" },
+      { "codigo": "vinculante_local", "nome": "Vinculante apenas para a região fiscal emissora" },
+      { "codigo": "orientativo", "nome": "Orientação sem efeito vinculante" },
+      { "codigo": "inter_partes", "nome": "Eficácia restrita às partes (decisões CARF, despachos)" }
+    ]
+  },
+
+  "status_vigencia": {
+    "_instrucao": "Estado de vigência do ato (vocabulário canônico do portal normasinternet2 da RFB).",
+    "lista": [
+      { "codigo": "vigente_nunca_alterado", "nome": "Ato vigente que nunca foi alterado", "cor_portal_rgb": "166,202,255" },
+      { "codigo": "vigente_alterado",       "nome": "Ato vigente que já foi alterado",   "cor_portal_rgb": "255,223,108" },
+      { "codigo": "nao_vigente",            "nome": "Ato não vigente",                    "cor_portal_rgb": "247,146,151" },
+      { "codigo": "revigorado",             "nome": "Ato revigorado",                     "cor_portal_rgb": "102,226,140" },
+      { "codigo": "retificador",            "nome": "Ato que promove retificação",        "cor_portal_rgb": "201,201,201" },
+      { "codigo": "em_divergencia",         "nome": "Aguardando uniformização por SD",    "cor_portal_rgb": null },
+      { "codigo": "anulada",                "nome": "Anulada por decisão judicial",       "cor_portal_rgb": null }
+    ]
+  },
+
+  "tipos_relacao_ato": {
+    "_instrucao": "Tipos canônicos de aresta no grafo ato_relacao, conforme legenda do portal normasinternet2.",
+    "lista": [
+      { "codigo": "referencia",        "nome": "Comando que não altera o texto nem a vigência de outra norma", "cor_portal_rgb": "0,95,236" },
+      { "codigo": "altera",            "nome": "Comando que altera o texto ou o período de vigência",          "cor_portal_rgb": "249,197,44" },
+      { "codigo": "interrompe",        "nome": "Comando que interrompe a vigência (revoga)",                   "cor_portal_rgb": "215,36,64" },
+      { "codigo": "recupera",          "nome": "Comando que recupera a vigência (revigora)",                   "cor_portal_rgb": "52,189,89" },
+      { "codigo": "retifica",          "nome": "Comando que retifica a norma",                                 "cor_portal_rgb": "126,126,126" },
+      { "codigo": "anotacao_futura",   "nome": "Comando que promove anotação futura (agendada)",               "cor_portal_rgb": "163,73,164" },
+      { "codigo": "regulamenta",       "nome": "Origem regulamenta lei/decreto destino (não-portal, derivado por LLM)", "cor_portal_rgb": null },
+      { "codigo": "cita",              "nome": "Origem cita destino como precedente (não-portal, derivado por LLM)",   "cor_portal_rgb": null },
+      { "codigo": "contradiz",         "nome": "Origem contradiz orientação anterior (não-portal, derivado por LLM)", "cor_portal_rgb": null },
+      { "codigo": "uniformiza",        "nome": "SD uniformiza divergência entre SCs (semântica de SD)",        "cor_portal_rgb": null },
+      { "codigo": "interpretado_por",  "nome": "Origem é interpretado por destino (ADI sobre IN)",             "cor_portal_rgb": null }
+    ]
+  },
+
+  "tributos": {
+    "_instrucao": "Use o campo 'codigo' no JSON. Cada tributo é item separado em materia_tributo. NUNCA agrupe ('PIS/COFINS' = dois itens separados).",
+    "lista": [
+      { "codigo": "IRPJ", "nome": "Imposto de Renda Pessoa Jurídica" },
+      { "codigo": "IRPF", "nome": "Imposto de Renda Pessoa Física" },
+      { "codigo": "IRRF", "nome": "Imposto de Renda Retido na Fonte" },
+      { "codigo": "CSLL", "nome": "Contribuição Social sobre o Lucro Líquido" },
+      { "codigo": "PIS", "nome": "Contribuição para o PIS/Pasep" },
+      { "codigo": "COFINS", "nome": "Contribuição para o Financiamento da Seguridade Social" },
+      { "codigo": "IPI", "nome": "Imposto sobre Produtos Industrializados" },
+      { "codigo": "II", "nome": "Imposto de Importação" },
+      { "codigo": "IE", "nome": "Imposto de Exportação" },
+      { "codigo": "IOF", "nome": "Imposto sobre Operações Financeiras" },
+      { "codigo": "ITR", "nome": "Imposto sobre a Propriedade Territorial Rural" },
+      { "codigo": "CIDE", "nome": "Contribuição de Intervenção no Domínio Econômico" },
+      { "codigo": "CONTRIB_PREV", "nome": "Contribuições Sociais Previdenciárias" },
+      { "codigo": "CONTRIB_PREV_PATRONAL", "nome": "Contribuição Previdenciária Patronal" },
+      { "codigo": "CONTRIB_PREV_SEGURADO", "nome": "Contribuição Previdenciária do Segurado" },
+      { "codigo": "GILRAT", "nome": "Contribuição ao GILRAT/SAT/RAT" },
+      { "codigo": "CONTRIB_TERCEIROS", "nome": "Contribuições a Terceiros (Sistema S, INCRA, Salário-Educação)" },
+      { "codigo": "SIMPLES", "nome": "Simples Nacional (regime unificado)" },
+      { "codigo": "FUNRURAL", "nome": "Contribuição ao FUNRURAL" },
+      { "codigo": "CPMF", "nome": "Contribuição Provisória sobre Movimentação Financeira" },
+      { "codigo": "AFRMM", "nome": "Adicional ao Frete para Renovação da Marinha Mercante" },
+      { "codigo": "TAXA_SISCOMEX", "nome": "Taxa de Utilização do Siscomex" },
+      { "codigo": "MULTA_ADUANEIRA", "nome": "Multas Aduaneiras (perdimento, isolada)" },
+      { "codigo": "MULTA_ISOLADA", "nome": "Multa Isolada (não vinculada a tributo específico)" },
+      { "codigo": "PROCESSO_ADM", "nome": "Processo Administrativo Fiscal (matéria exclusivamente processual)" },
+      { "codigo": "IBS", "nome": "Imposto sobre Bens e Serviços (reforma tributária)" },
+      { "codigo": "CBS", "nome": "Contribuição sobre Bens e Serviços (reforma tributária)" },
+      { "codigo": "IS", "nome": "Imposto Seletivo (reforma tributária)" }
+    ],
+    "_nao_mapeado": "Use '__NOVO_TRIBUTO' + 'tributo_sugerido'"
+  },
+
+  "regimes_tributarios": {
+    "_instrucao": "Aplica-se a 'regime' em materia_tributo. Use null se não aplicável.",
+    "lista": [
+      "cumulativo", "nao_cumulativo", "lucro_real", "lucro_presumido",
+      "lucro_arbitrado", "simples_nacional", "imune", "isento", "monofasico",
+      "substituicao_tributaria", "diferimento"
+    ],
+    "_nao_mapeado": "Use '__NOVO_REGIME' + 'regime_sugerido'"
+  },
+
+  "natureza_materia": {
+    "_instrucao": "CARF usa preliminar/merito/admissibilidade. SC/SD/normativos usam 'orientacao' ou 'dispositivo'.",
+    "lista": ["preliminar", "prejudicial", "merito", "admissibilidade", "orientacao", "dispositivo"]
+  },
+
+  "tipos_resultado_materia": {
+    "_instrucao": "Resultado por matéria. CARF: favoravel_*. SC: aplicavel/nao_aplicavel/parcial. Normativo: vigente/revogado.",
+    "lista": [
+      "favoravel_contribuinte", "favoravel_fazenda",
+      "parcialmente_favoravel_contribuinte", "parcialmente_favoravel_fazenda",
+      "nulidade", "nao_conhecido", "nao_analisado_merito_prejudicado",
+      "diligencia", "sem_resolucao",
+      "aplicavel", "nao_aplicavel", "aplicavel_parcial",
+      "vigente", "revogado", "alterado"
+    ]
+  },
+
+  "tipos_fundamentacao": {
+    "_instrucao": "Tipo de norma citada em materia_dispositivo.tipo_norma.",
+    "lista": [
+      "constituicao", "lei_complementar", "lei", "medida_provisoria",
+      "decreto_lei", "decreto", "instrucao_normativa", "instrucao_normativa_conjunta",
+      "portaria", "portaria_normativa", "resolucao",
+      "sumula_carf", "sumula_vinculante", "sumula_stf", "sumula_stj",
+      "tema_stf", "tema_stj",
+      "solucao_consulta", "solucao_consulta_interna", "solucao_divergencia",
+      "parecer_normativo", "parecer",
+      "ato_declaratorio", "ato_declaratorio_interpretativo", "ato_declaratorio_executivo",
+      "ato_declaratorio_normativo",
+      "nota_tecnica", "ordem_servico",
+      "jurisprudencia_judicial", "jurisprudencia_carf",
+      "norma_tecnica_externa"
+    ]
+  },
+
+  "temas": {
+    "_instrucao": "Hierarquia 3 níveis: tema_macro > tema_especifico > subtema. tema_macro e tema_especifico OBRIGATÓRIOS. subtema opcional.",
+    "_sobre_tags": "Campo 'tags' é LIVRE — quantas forem úteis. Não controlado.",
+    "_sobre_metadata_tematico": "Cada tema_especifico pode ter um schema em references/schemas_metadata_tematico/{TEMA}.json. Quando existir, ato_materia.metadata_tematico DEVE seguir o schema.",
+
+    "lista": [
+      {
+        "tema_macro": "CREDITAMENTO",
+        "descricao": "Direito a créditos tributários (regime não cumulativo)",
+        "temas_especificos": [
+          { "codigo": "CREDITAMENTO.CONCEITO_INSUMO", "descricao": "Definição e alcance do conceito de insumo" },
+          { "codigo": "CREDITAMENTO.INSUMO_INSUMO", "descricao": "Créditos sobre insumos da fase agrícola/anterior" },
+          { "codigo": "CREDITAMENTO.ALIQUOTA_ZERO", "descricao": "Crédito sobre aquisições com alíquota zero" },
+          { "codigo": "CREDITAMENTO.ISENCAO_NT", "descricao": "Crédito sobre aquisições isentas/não tributadas" },
+          { "codigo": "CREDITAMENTO.ATIVO_IMOBILIZADO", "descricao": "Crédito sobre depreciação/aquisição de bens do ativo" },
+          { "codigo": "CREDITAMENTO.ENERGIA_ELETRICA", "descricao": "Crédito sobre energia elétrica" },
+          { "codigo": "CREDITAMENTO.FRETE", "descricao": "Crédito sobre fretes/transportes" },
+          { "codigo": "CREDITAMENTO.ARMAZENAGEM", "descricao": "Crédito sobre armazenagem" },
+          { "codigo": "CREDITAMENTO.ALUGUEIS", "descricao": "Crédito sobre aluguéis (imóveis/equipamentos)" },
+          { "codigo": "CREDITAMENTO.CREDITO_PRESUMIDO", "descricao": "Crédito presumido (agroindústria, etc.)" },
+          { "codigo": "CREDITAMENTO.RESSARCIMENTO", "descricao": "Pedido de ressarcimento de créditos acumulados" },
+          { "codigo": "CREDITAMENTO.COMPENSACAO", "descricao": "Compensação de créditos via DCOMP" }
+        ]
+      },
+      {
+        "tema_macro": "CLASSIFICACAO_FISCAL",
+        "descricao": "Enquadramento e classificação de produtos, mercadorias e operações",
+        "temas_especificos": [
+          { "codigo": "CLASSIFICACAO_FISCAL.NCM", "descricao": "Classificação na NCM" },
+          { "codigo": "CLASSIFICACAO_FISCAL.PRODUTO", "descricao": "Natureza ou enquadramento do produto", "metadata_schema_obrigatorio": true },
+          { "codigo": "CLASSIFICACAO_FISCAL.TIPI", "descricao": "Enquadramento na TIPI" },
+          { "codigo": "CLASSIFICACAO_FISCAL.OPERACAO", "descricao": "Natureza da operação (industrialização/revenda/exportação)" },
+          { "codigo": "CLASSIFICACAO_FISCAL.SERVICO", "descricao": "Classificação de serviço (NBS, CNAE)" }
+        ]
+      },
+      {
+        "tema_macro": "ALIQUOTA_E_BASE_CALCULO",
+        "descricao": "Alíquotas e base de cálculo",
+        "temas_especificos": [
+          { "codigo": "ALIQUOTA_E_BASE_CALCULO.ALIQUOTA_ZERO", "descricao": "Aplicação de alíquota zero" },
+          { "codigo": "ALIQUOTA_E_BASE_CALCULO.REDUCAO_ALIQUOTA", "descricao": "Redução de alíquota por benefício fiscal" },
+          { "codigo": "ALIQUOTA_E_BASE_CALCULO.BASE_CALCULO", "descricao": "Composição/exclusão de valores da BC" },
+          { "codigo": "ALIQUOTA_E_BASE_CALCULO.EXCLUSAO_ICMS", "descricao": "Exclusão do ICMS da BC do PIS/COFINS" },
+          { "codigo": "ALIQUOTA_E_BASE_CALCULO.RECEITA_TRIBUTAVEL", "descricao": "Definição de receita tributável" },
+          { "codigo": "ALIQUOTA_E_BASE_CALCULO.MONOFASICO", "descricao": "Regime monofásico de tributação" },
+          { "codigo": "ALIQUOTA_E_BASE_CALCULO.SUBSTITUICAO_TRIBUTARIA", "descricao": "Substituição tributária" }
+        ]
+      },
+      {
+        "tema_macro": "LANCAMENTO",
+        "descricao": "Procedimento de lançamento tributário",
+        "temas_especificos": [
+          { "codigo": "LANCAMENTO.AFERICAO_INDIRETA", "descricao": "Lançamento por arbitramento" },
+          { "codigo": "LANCAMENTO.AUTO_INFRACAO", "descricao": "Requisitos do auto de infração" },
+          { "codigo": "LANCAMENTO.DECADENCIA", "descricao": "Prazo decadencial" },
+          { "codigo": "LANCAMENTO.PRESCRICAO", "descricao": "Prazo prescricional" },
+          { "codigo": "LANCAMENTO.ERRO_LANCAMENTO", "descricao": "Erro de fato ou de direito" },
+          { "codigo": "LANCAMENTO.JUROS_MORA", "descricao": "Juros de mora (SELIC)" },
+          { "codigo": "LANCAMENTO.MULTA_OFICIO", "descricao": "Multa de ofício (75%, 150%)" },
+          { "codigo": "LANCAMENTO.MULTA_QUALIFICADA", "descricao": "Qualificação de multa (sonegação/fraude/conluio)" },
+          { "codigo": "LANCAMENTO.MULTA_ISOLADA", "descricao": "Multa isolada" }
+        ]
+      },
+      {
+        "tema_macro": "RESPONSABILIDADE_TRIBUTARIA",
+        "descricao": "Responsabilidade de terceiros pelo crédito tributário",
+        "temas_especificos": [
+          { "codigo": "RESPONSABILIDADE_TRIBUTARIA.GRUPO_ECONOMICO", "descricao": "Solidariedade por grupo econômico" },
+          { "codigo": "RESPONSABILIDADE_TRIBUTARIA.SOLIDARIEDADE", "descricao": "Solidariedade em geral" },
+          { "codigo": "RESPONSABILIDADE_TRIBUTARIA.SOCIO_ADMINISTRADOR", "descricao": "Sócios e administradores (art. 135 CTN)" },
+          { "codigo": "RESPONSABILIDADE_TRIBUTARIA.SUCESSAO", "descricao": "Sucessão empresarial" },
+          { "codigo": "RESPONSABILIDADE_TRIBUTARIA.TERCEIROS", "descricao": "Terceiros em geral (art. 134 CTN)" }
+        ]
+      },
+      {
+        "tema_macro": "SIMPLES_NACIONAL",
+        "descricao": "Regime do Simples Nacional",
+        "temas_especificos": [
+          { "codigo": "SIMPLES_NACIONAL.EXCLUSAO", "descricao": "Exclusão (de ofício/voluntária)" },
+          { "codigo": "SIMPLES_NACIONAL.EFEITOS_EXCLUSAO", "descricao": "Efeitos temporais" },
+          { "codigo": "SIMPLES_NACIONAL.OPCAO", "descricao": "Requisitos de opção" },
+          { "codigo": "SIMPLES_NACIONAL.SUBLIMITE", "descricao": "Excesso de receita / sublimites" },
+          { "codigo": "SIMPLES_NACIONAL.ATIVIDADE_VEDADA", "descricao": "Atividade vedada" },
+          { "codigo": "SIMPLES_NACIONAL.FATOR_R", "descricao": "Aplicação do fator R" }
+        ]
+      },
+      {
+        "tema_macro": "PROCESSO_ADMINISTRATIVO",
+        "descricao": "Contencioso administrativo fiscal",
+        "temas_especificos": [
+          { "codigo": "PROCESSO_ADMINISTRATIVO.NULIDADE", "descricao": "Nulidade de atos/decisões" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.PRETERICAO_DEFESA", "descricao": "Preterição do direito de defesa" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.CERCEAMENTO_DEFESA", "descricao": "Cerceamento do direito de defesa" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.COMPETENCIA", "descricao": "Competência do órgão" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.TEMPESTIVIDADE", "descricao": "Tempestividade" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.LEGITIMIDADE", "descricao": "Legitimidade ativa/passiva" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.DILIGENCIA", "descricao": "Diligência/perícia" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.INTIMACAO", "descricao": "Vícios de intimação" }
+        ]
+      },
+      {
+        "tema_macro": "ADMISSIBILIDADE_RECURSAL",
+        "descricao": "Admissibilidade de recursos (CSRF)",
+        "temas_especificos": [
+          { "codigo": "ADMISSIBILIDADE_RECURSAL.DIVERGENCIA", "descricao": "Divergência jurisprudencial" },
+          { "codigo": "ADMISSIBILIDADE_RECURSAL.SIMILITUDE", "descricao": "Similitude com paradigma" },
+          { "codigo": "ADMISSIBILIDADE_RECURSAL.DIALETICIDADE", "descricao": "Dever de dialeticidade" },
+          { "codigo": "ADMISSIBILIDADE_RECURSAL.INTERESSE_RECURSAL", "descricao": "Interesse recursal" },
+          { "codigo": "ADMISSIBILIDADE_RECURSAL.FUNDAMENTO_AUTONOMO", "descricao": "Fundamento autônomo não atacado" }
+        ]
+      },
+      {
+        "tema_macro": "IRPJ_CSLL",
+        "descricao": "Temas específicos de IRPJ/CSLL",
+        "temas_especificos": [
+          { "codigo": "IRPJ_CSLL.DESPESA_DEDUTIVEL", "descricao": "Dedutibilidade de despesas" },
+          { "codigo": "IRPJ_CSLL.AMORTIZACAO_AGIO", "descricao": "Amortização de ágio (incorporação/fusão/cisão)", "metadata_schema_obrigatorio": true },
+          { "codigo": "IRPJ_CSLL.PRECO_TRANSFERENCIA", "descricao": "Preços de transferência" },
+          { "codigo": "IRPJ_CSLL.LUCRO_EXTERIOR", "descricao": "Tributação de lucros no exterior" },
+          { "codigo": "IRPJ_CSLL.PLANEJAMENTO_TRIBUTARIO", "descricao": "Planejamento (elisão vs evasão)" },
+          { "codigo": "IRPJ_CSLL.OMISSAO_RECEITA", "descricao": "Omissão de receita / subfaturamento" },
+          { "codigo": "IRPJ_CSLL.DEPOSITOS_BANCARIOS", "descricao": "Presunção por depósitos bancários" },
+          { "codigo": "IRPJ_CSLL.JCP", "descricao": "Juros sobre Capital Próprio" },
+          { "codigo": "IRPJ_CSLL.DISTRIBUICAO_LUCROS", "descricao": "Distribuição disfarçada/isenta" },
+          { "codigo": "IRPJ_CSLL.SUBVENCAO", "descricao": "Subvenções para investimento" }
+        ]
+      },
+      {
+        "tema_macro": "CONTRIBUICOES_PREVIDENCIARIAS",
+        "descricao": "Contribuições previdenciárias e a terceiros",
+        "temas_especificos": [
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.VINCULO_EMPREGATICIO", "descricao": "Caracterização de vínculo empregatício" },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.REMUNERACAO", "descricao": "Natureza remuneratória vs indenizatória", "metadata_schema_obrigatorio": true },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.PROLABORE", "descricao": "Pró-labore" },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.SCP", "descricao": "Sociedade em Conta de Participação" },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.GILRAT_RAT", "descricao": "Enquadramento GILRAT/RAT/SAT" },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.TERCEIROS", "descricao": "Sistema S, Salário-Educação" },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.IMUNIDADE_ISENCAO", "descricao": "Imunidade/isenção" },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.DECADENCIA_PREV", "descricao": "Decadência específica" },
+          { "codigo": "CONTRIBUICOES_PREVIDENCIARIAS.AGROINDUSTRIA", "descricao": "Setor agroindustrial / FUNRURAL" }
+        ]
+      },
+      {
+        "tema_macro": "COMERCIO_EXTERIOR",
+        "descricao": "Importação, exportação e aduaneira",
+        "temas_especificos": [
+          { "codigo": "COMERCIO_EXTERIOR.VALOR_ADUANEIRO", "descricao": "Valoração aduaneira" },
+          { "codigo": "COMERCIO_EXTERIOR.CLASSIFICACAO_NCM", "descricao": "Classificação fiscal de mercadorias", "metadata_schema_obrigatorio": true },
+          { "codigo": "COMERCIO_EXTERIOR.PENA_PERDIMENTO", "descricao": "Pena de perdimento" },
+          { "codigo": "COMERCIO_EXTERIOR.DRAWBACK", "descricao": "Regime de drawback" },
+          { "codigo": "COMERCIO_EXTERIOR.SUBFATURAMENTO", "descricao": "Subfaturamento" },
+          { "codigo": "COMERCIO_EXTERIOR.INTERPOSICAO_FRAUDULENTA", "descricao": "Interposição fraudulenta" },
+          { "codigo": "COMERCIO_EXTERIOR.ORIGEM_MERCADORIA", "descricao": "Origem da mercadoria" },
+          { "codigo": "COMERCIO_EXTERIOR.REGIME_ESPECIAL", "descricao": "Regimes aduaneiros especiais" }
+        ]
+      },
+      {
+        "tema_macro": "IRPF",
+        "descricao": "Imposto de Renda Pessoa Física",
+        "temas_especificos": [
+          { "codigo": "IRPF.RENDIMENTO_TRIBUTAVEL", "descricao": "Caracterização de rendimento tributável" },
+          { "codigo": "IRPF.DEDUCAO", "descricao": "Deduções (saúde, educação, dependentes)" },
+          { "codigo": "IRPF.GANHO_CAPITAL", "descricao": "Ganho de capital" },
+          { "codigo": "IRPF.ISENCAO", "descricao": "Rendimentos isentos" },
+          { "codigo": "IRPF.DEPOSITOS_BANCARIOS", "descricao": "Presunção por depósitos bancários" },
+          { "codigo": "IRPF.EXTERIOR", "descricao": "Rendimentos do exterior / carnê-leão" }
+        ]
+      },
+      {
+        "tema_macro": "IPI",
+        "descricao": "Imposto sobre Produtos Industrializados",
+        "temas_especificos": [
+          { "codigo": "IPI.CLASSIFICACAO", "descricao": "Classificação na TIPI", "metadata_schema_obrigatorio": true },
+          { "codigo": "IPI.CREDITO", "descricao": "Crédito de IPI" },
+          { "codigo": "IPI.INDUSTRIALIZACAO", "descricao": "Conceito de industrialização" },
+          { "codigo": "IPI.ALIQUOTA", "descricao": "Alíquota e enquadramento" },
+          { "codigo": "IPI.SELO_CONTROLE", "descricao": "Selo de controle" }
+        ]
+      },
+      {
+        "tema_macro": "BENEFICIO_FISCAL",
+        "descricao": "Incentivos, isenções, imunidades",
+        "temas_especificos": [
+          { "codigo": "BENEFICIO_FISCAL.ISENCAO", "descricao": "Isenção em geral" },
+          { "codigo": "BENEFICIO_FISCAL.IMUNIDADE", "descricao": "Imunidade constitucional" },
+          { "codigo": "BENEFICIO_FISCAL.ZONA_FRANCA", "descricao": "Zona Franca de Manaus / ALC" },
+          { "codigo": "BENEFICIO_FISCAL.SUDENE_SUDAM", "descricao": "SUDENE / SUDAM" },
+          { "codigo": "BENEFICIO_FISCAL.PADIS_PATVD", "descricao": "PADIS / PATVD" },
+          { "codigo": "BENEFICIO_FISCAL.REINTEGRA", "descricao": "REINTEGRA" },
+          { "codigo": "BENEFICIO_FISCAL.LEI_ROUANET", "descricao": "Lei Rouanet" },
+          { "codigo": "BENEFICIO_FISCAL.PAT", "descricao": "PAT" },
+          { "codigo": "BENEFICIO_FISCAL.ENTIDADE_SEM_FINS", "descricao": "Entidades sem fins lucrativos / filantrópicas" },
+          { "codigo": "BENEFICIO_FISCAL.PERSE", "descricao": "Programa Emergencial Setor de Eventos (PERSE)" }
+        ]
+      },
+      {
+        "tema_macro": "OBRIGACAO_ACESSORIA",
+        "descricao": "Obrigações acessórias e multas por descumprimento",
+        "temas_especificos": [
+          { "codigo": "OBRIGACAO_ACESSORIA.DCTF", "descricao": "DCTF" },
+          { "codigo": "OBRIGACAO_ACESSORIA.EFD", "descricao": "EFD-Contribuições, EFD-ICMS/IPI" },
+          { "codigo": "OBRIGACAO_ACESSORIA.DIRF", "descricao": "DIRF" },
+          { "codigo": "OBRIGACAO_ACESSORIA.GFIP", "descricao": "GFIP" },
+          { "codigo": "OBRIGACAO_ACESSORIA.ESOCIAL", "descricao": "eSocial" },
+          { "codigo": "OBRIGACAO_ACESSORIA.ECF", "descricao": "ECF" },
+          { "codigo": "OBRIGACAO_ACESSORIA.ECD", "descricao": "ECD" },
+          { "codigo": "OBRIGACAO_ACESSORIA.MULTA_DESCUMPRIMENTO", "descricao": "Multa por descumprimento" }
+        ]
+      },
+      {
+        "tema_macro": "REFORMA_TRIBUTARIA",
+        "descricao": "Reforma tributária (EC 132/2023): IBS, CBS, IS, transição",
+        "temas_especificos": [
+          { "codigo": "REFORMA_TRIBUTARIA.IBS", "descricao": "Imposto sobre Bens e Serviços" },
+          { "codigo": "REFORMA_TRIBUTARIA.CBS", "descricao": "Contribuição sobre Bens e Serviços" },
+          { "codigo": "REFORMA_TRIBUTARIA.IS", "descricao": "Imposto Seletivo" },
+          { "codigo": "REFORMA_TRIBUTARIA.TRANSICAO", "descricao": "Regras de transição" },
+          { "codigo": "REFORMA_TRIBUTARIA.CASHBACK", "descricao": "Cashback" },
+          { "codigo": "REFORMA_TRIBUTARIA.SPLIT_PAYMENT", "descricao": "Split payment" }
+        ]
+      }
+    ],
+    "_nao_mapeado": "Use '__NOVO_TEMA' + 'tema_macro_sugerido' + 'tema_especifico_sugerido'. Antes, verifique se não cabe em tema existente."
+  },
+
+  "setores_economicos": {
+    "_instrucao": "Texto livre, mas use valores existentes quando possível.",
+    "lista_referencia": [
+      "agroindustria", "alimentacao_fast_food", "comercio_varejista", "comercio_atacadista",
+      "industria_transformacao", "construcao_civil", "educacao", "saude", "tecnologia",
+      "financeiro", "seguros", "telecomunicacoes", "transporte_logistica", "energia",
+      "mineracao", "petroleo_gas", "farmaceutico", "automotivo", "imobiliario",
+      "servicos_profissionais", "hotelaria_turismo", "entretenimento", "agropecuaria",
+      "pessoa_fisica", "terceiro_setor", "publico"
+    ]
+  }
+}

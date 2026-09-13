@@ -1,0 +1,205 @@
+{
+  "_versao": "1.0",
+  "_descricao": "Dicionario canonico de normalizacao. Cada chave eh um valor canonico; o array sao variantes que devem ser mapeadas pra ela. Aplicado em INSERT no apply (apos resposta do LLM) e em backfill periodico. Use lower(strip()) para match insensivel a caso/whitespace; tambem aplica unidecode para tolerar acentuacao.",
+  "_aplicacao": [
+    "1. Antes de gravar tributo_codigo, tema_macro, tema_especifico, tipo_norma, tipo_uso, tipo_relacao: passar pelo normalize.normalizar_*().",
+    "2. Se o valor nao bate em variante nem canonico, registra em valores_nao_mapeados.json para revisao humana.",
+    "3. Hooks PreToolUse podem rejeitar SQL com valor fora do canonico no futuro."
+  ],
+
+  "tributos": {
+    "_canonicos": [
+      "IRPJ","IRPF","IRRF","CSLL","PIS","COFINS","IPI","II","IE","IOF","ITR","CIDE",
+      "CONTRIB_PREV","CONTRIB_PREV_PATRONAL","CONTRIB_PREV_SEGURADO","GILRAT",
+      "CONTRIB_TERCEIROS","SIMPLES","FUNRURAL","CPMF","AFRMM","TAXA_SISCOMEX",
+      "MULTA_ADUANEIRA","MULTA_ISOLADA","PROCESSO_ADM","IBS","CBS","IS",
+      "FINSOCIAL","ISS","ICMS","EMPRESTIMO_COMPULSORIO","ITCMD","ITBI","FGTS"
+    ],
+    "_aliases": {
+      "PIS": ["PASEP","PIS_PASEP","PIS/PASEP","PIS-PASEP","PIS_REPIQUE","PIS_DEDUCAO","PIS REPIQUE","CONTRIB_PIS","CONTRIB_PIS_PASEP","CONTRIBUICAO_PIS","piscofins","pis","Pis"],
+      "COFINS": ["FINSOCIAL","COFINS_INSS","CONTRIB_COFINS","CONTRIBUICAO_COFINS","cofins","Cofins"],
+      "CSLL": ["CSL","CSS","CSLL_PIS_COFINS","csll","Csll","CONTRIB_SOCIAL_LUCRO","CSL_LUCRO"],
+      "IRPJ": ["IRPJ_CSLL","IR-PJ","IR_PJ","IRPJ_LL","ITPJ","ILL","ILUL1","IIUM","IIAA","IRLL","IISTR","IILL","irpj"],
+      "IRPF": ["IRPF_CSLL","IR-PF","IR_PF","ITRPF","irpf"],
+      "IRRF": ["IR-FONTE","IR_FONTE","IRFONTE","IRFON","IRRFONTE","IRF","IR FONTE","IRF_FONTE","IRRF_CSLL","IRFonte","IR-fonte","IRfonte"],
+      "IPI": ["ipi","Ipi","IPMF"],
+      "II": ["IMP_IMPORTACAO","IMPORTACAO","ii"],
+      "IE": ["IMP_EXPORTACAO","EXPORTACAO","ie"],
+      "IOF": ["IOF_CREDITO","IOF_CAMBIO","IOF_VALORES_MOBILIARIOS"],
+      "ITR": ["IMP_TERRITORIAL_RURAL","itr"],
+      "CIDE": ["CIDE_COMBUSTIVEIS","CIDE_REMESSA","cide"],
+      "CONTRIB_PREV": ["CONTRIB_PREV_TERCEIROS","CPP","INSS","RAT","SAT","CPRB","FAP","PREVIDENCIA"],
+      "CONTRIB_PREV_PATRONAL": ["CONTRIB_PREV_PATRONAL_RAT","CONTRIB_PREV_PATRONAL_CONTRATO","CONTRIB_PREV_PATRONAL_RISCOS_AMBIENTAIS"],
+      "CONTRIB_TERCEIROS": ["CONTAG","CONTAO","SENAR","SENAr","CONTRIB_SENAR","CONTRIB_CONTAG","CONTRIB_CNA","CONTRIB_SIND_EMPREGADOR","CONTRIB_SIND_TRAB","CONTRIB_SINDICATO_EMPREGADOR","CONTRIB_SIND_SENAR","CONTRIB_PARAFISCAL","CONTRIB_ACAUCAR","CONTRIB_CAB","CNA","CNA_CONTAG","CNA_CONAG","CNA-7","SISTEMA_S","SALARIO_EDUCACAO","INCRA","SESC","SESI","SENAC","SENAI"],
+      "SIMPLES": ["SIMPLES_NACIONAL","SUPER_SIMPLES","simples","simples_nacional"],
+      "GILRAT": ["RAT","SAT","RAT_SAT","GILRAT_RAT","GILRAT_SAT"],
+      "FUNRURAL": ["FUNRURAL_PESSOA_FISICA","FUNRURAL_EMPREGADOR_RURAL","SENAR_RURAL"],
+      "ICMS": ["ICM","ICMS_ST","ICMS-ST"],
+      "ISS": ["ISSQN","iss","Iss"],
+      "EMPRESTIMO_COMPULSORIO": ["EMPRÉSTIMO_COMPULSÓRIO","EMPRÉSTIMO_COMPULSORIO","EMPRESTIMO COMPULSORIO"],
+      "MULTA_ISOLADA": ["MULTA_OFICIO","MULTA_QUALIFICADA","MULTA_REGULAMENTAR"],
+      "PROCESSO_ADM": ["PROCESS_ADM","PROCESSO_ADMINISTRATIVO","PROC_ADM"]
+    },
+    "_rejeitar_valores": [
+      "IN","PT","CS","TR","CFL_30","CFL_33","CFL_68","TI","TMP","6912","5856","DCOMP","DIPJ","DCTF","GFIP","RET","REFIS","PERC","PER","__NOVO_TRIBUTO",
+      "EM","JAPI","CSS","TAXA_CADASTRAL","TAXA_SERVICOS","TAXA_SERVICOS_CADASTRAL","REINTEGRA","REFLEXOS","JCP","DRAWBACK","CONTA","CONTA_G",
+      "OBRIGACAO_ACESSORIA","BENEFICIO_FISCAL","COMERCIO_EXTERIOR","CSRF","LANCAMENTO.JUROS_MORA","LANCAMENTO.MULTA_OFICIO","LANCAMENTO.MULTA_QUALIFICADA","LANCAMENTO.MULTA_ISOLADA","LANCAMENTO.MULTA_EQUIVALENTE_VALOR_ADUANEIRO",
+      "JUROS_MORA","MPF","TR","TRD","TDA","TDAs","TSC","RUM","RI","IST","ISTR","IUEE","IUM","IL","IR","COHNS","FUNDAF","FAP","FGTS","FINOR","FINAM","IPTU","ITPJ","PAES","PT","CAA","CAAA","ITP","PLR","CFL","IRfonte","COMP_PARAFISCAL","CONDECINE","ITRPF","SENAr","CONTRIB_SOCIAL"
+    ],
+    "_observacao_rejeicao": "Estes valores apareceram no CARF mas: ou sao tributos estaduais/municipais (ICMS pra um caso, ISS, ITCMD), ou sao temas mascarados de tributo (MULTA_OFICIO eh um tipo de multa = tema), ou sao IDs/lixo (6912), ou sao categorias diferentes (DCTF, GFIP, DCOMP sao obrigacoes acessorias). Quando recebermos um deles, tentar realocar pra tema correto."
+  },
+
+  "temas_macro": {
+    "_canonicos": [
+      "CREDITAMENTO","CLASSIFICACAO_FISCAL","ALIQUOTA_E_BASE_CALCULO","LANCAMENTO",
+      "RESPONSABILIDADE_TRIBUTARIA","SIMPLES_NACIONAL","PROCESSO_ADMINISTRATIVO",
+      "ADMISSIBILIDADE_RECURSAL","IRPJ_CSLL","CONTRIBUICOES_PREVIDENCIARIAS",
+      "COMERCIO_EXTERIOR","IRPF","IPI","BENEFICIO_FISCAL","OBRIGACAO_ACESSORIA",
+      "REFORMA_TRIBUTARIA"
+    ],
+    "_aliases": {
+      "PROCESSO_ADMINISTRATIVO": ["PROCESS_ADMINISTRATIVO","PROC_ADMINISTRATIVO","PROCESSO_ADM","PAF","PROCESSO_ADMINISTRATIVO_FISCAL"],
+      "CREDITAMENTO": ["CREDITAMENTE","CREDITO","CREDITOS","NAO_CUMULATIVIDADE"],
+      "LANCAMENTO": ["LANCAMENTOS","LANCAMENTOS_DECORRENTES","LANCAMENTOS_REFLEXOS","AUTO_INFRACAO","NLI"],
+      "ADMISSIBILIDADE_RECURSAL": ["ADMISSIBILIDADE","ADMISSAO_RECURSAL"],
+      "ALIQUOTA_E_BASE_CALCULO": ["ALIQUOTA","BASE_CALCULO","BC","ALIQUOTA_BC"]
+    },
+    "_realocar_de_tributo_para_tema": {
+      "_doc": "Quando o LLM coloca um TRIBUTO no campo tema_macro, mapear para o tema correto (default: ALIQUOTA_E_BASE_CALCULO; tributo_codigo deve ir para materia_tributo).",
+      "PIS": "ALIQUOTA_E_BASE_CALCULO",
+      "COFINS": "ALIQUOTA_E_BASE_CALCULO",
+      "CSLL": "IRPJ_CSLL",
+      "IRPJ": "IRPJ_CSLL",
+      "IRPF_CSLL": "IRPF",
+      "IRRF_CSLL": "IRPF",
+      "PIS_COFINS": "ALIQUOTA_E_BASE_CALCULO",
+      "CSLL_PIS_COFINS": "ALIQUOTA_E_BASE_CALCULO",
+      "ICMS": "ALIQUOTA_E_BASE_CALCULO",
+      "CIDE": "ALIQUOTA_E_BASE_CALCULO",
+      "FINSOCIAL": "ALIQUOTA_E_BASE_CALCULO",
+      "GILRAT": "CONTRIBUICOES_PREVIDENCIARIAS",
+      "CONTRIB_PREV_PATRONAL": "CONTRIBUICOES_PREVIDENCIARIAS",
+      "CONTRIB_TERCEIROS": "CONTRIBUICOES_PREVIDENCIARIAS",
+      "ITR": "ALIQUOTA_E_BASE_CALCULO",
+      "IPI": "IPI",
+      "IRPF": "IRPF",
+      "IOF": "ALIQUOTA_E_BASE_CALCULO"
+    },
+    "_rejeitar_valores": ["NORMAS_GERAIS","__NOVO_TEMA","NULL","null"]
+  },
+
+  "regimes_tributarios": {
+    "_canonicos": [
+      "cumulativo","nao_cumulativo","lucro_real","lucro_presumido","lucro_arbitrado",
+      "simples_nacional","imune","isento","monofasico","substituicao_tributaria","diferimento",
+      "ret_incorporacao","credito_presumido_cafe","especial_folha_salarios"
+    ],
+    "_aliases": {
+      "cumulativo": ["regime_cumulativo","cumulativo_pis_cofins","CUMULATIVO"],
+      "nao_cumulativo": ["nao_cumulativo_pis_cofins","NAO_CUMULATIVO","não_cumulativo","não-cumulativo","nao-cumulativo"],
+      "lucro_real": ["LUCRO_REAL","real","lucro real"],
+      "lucro_presumido": ["LUCRO_PRESUMIDO","presumido","lucro presumido"],
+      "simples_nacional": ["SIMPLES_NACIONAL","simples","SIMPLES"],
+      "monofasico": ["regime_monofasico","monofasica","MONOFASICO"],
+      "substituicao_tributaria": ["ST","substituicao_tributaria_progressiva","substituicao_progressiva","REGIME_ST","st"]
+    }
+  },
+
+  "tipo_norma": {
+    "_canonicos": [
+      "constituicao","lei_complementar","lei","medida_provisoria","decreto_lei",
+      "decreto","instrucao_normativa","instrucao_normativa_conjunta","portaria",
+      "portaria_normativa","portaria_conjunta","resolucao",
+      "sumula_carf","sumula_vinculante","sumula_stf","sumula_stj",
+      "tema_stf","tema_stj","jurisprudencia_judicial","jurisprudencia_carf",
+      "solucao_consulta","solucao_consulta_interna","solucao_divergencia",
+      "parecer_normativo","parecer","ato_declaratorio","ato_declaratorio_interpretativo",
+      "ato_declaratorio_executivo","ato_declaratorio_normativo","nota_tecnica",
+      "ordem_servico","norma_tecnica_externa"
+    ],
+    "_aliases": {
+      "lei_complementar": ["LC","Lei Complementar","LEI_COMPLEMENTAR"],
+      "lei": ["Lei","LEI","lei_ordinaria","lei ordinaria"],
+      "medida_provisoria": ["MP","Medida Provisoria","MEDIDA_PROVISORIA"],
+      "decreto": ["DECRETO","Decreto"],
+      "decreto_lei": ["DL","Decreto-Lei","DECRETO_LEI","decreto-lei"],
+      "instrucao_normativa": ["IN","IN_RFB","INSTRUCAO_NORMATIVA","Instrucao Normativa","Instrução Normativa"],
+      "portaria": ["Port.","Portaria","PORTARIA"],
+      "portaria_normativa": ["Port. Norm.","Portaria Normativa"],
+      "resolucao": ["Resol.","Resolucao","RESOLUCAO","Resolução"],
+      "sumula_carf": ["sumula CARF","Sumula CARF","SUMULA_CARF","S.CARF"],
+      "sumula_stf": ["sumula STF","Sumula STF","SUMULA_STF"],
+      "sumula_stj": ["sumula STJ","Sumula STJ","SUMULA_STJ"],
+      "sumula_vinculante": ["SV","Sumula Vinculante","SUMULA_VINCULANTE"],
+      "tema_stf": ["TEMA_STF","Tema STF","tema STF","stf_tema"],
+      "tema_stj": ["TEMA_STJ","Tema STJ","tema STJ","stj_tema","tema_repetitivo_stj","REsp_repetitivo"],
+      "jurisprudencia_judicial": ["jurisprudencia","RE","REsp","ARE","ADIN","ADC","ADI_judicial","STF","STJ","TRF","TJ"],
+      "solucao_consulta": ["SC","sc","Solucao Consulta","SOLUCAO_CONSULTA","Solução de Consulta"],
+      "solucao_consulta_interna": ["SCI","Solucao Consulta Interna","SOLUCAO_CONSULTA_INTERNA"],
+      "solucao_divergencia": ["SD","Solucao Divergencia","SOLUCAO_DIVERGENCIA"],
+      "parecer_normativo": ["PN","Parecer Normativo","PARECER_NORMATIVO"],
+      "parecer": ["Parecer SEI","parecer_pgfn","parecer_me","PARECER_SEI","Parecer"],
+      "ato_declaratorio_interpretativo": ["ADI","Ato Declaratorio Interpretativo","ADI_interpretativo"],
+      "ato_declaratorio_executivo": ["ADE","Ato Declaratorio Executivo"],
+      "ato_declaratorio_normativo": ["ADN","Ato Declaratorio Normativo"],
+      "ato_declaratorio": ["AD","Ato Declaratorio"],
+      "nota_tecnica": ["NT","Nota Tecnica","NOTA_TECNICA"],
+      "ordem_servico": ["OS","Ordem Servico","ORDEM_SERVICO"]
+    }
+  },
+
+  "tipo_uso": {
+    "_canonicos": [
+      "fundamento_principal","fundamento_acessorio","fundamento_externo",
+      "regulamentacao","citacao","precedente","interpretacao"
+    ],
+    "_aliases": {
+      "fundamento_principal": ["principal","main","FUNDAMENTO_PRINCIPAL","fundamentacao_principal"],
+      "fundamento_acessorio": ["acessorio","secundario","FUNDAMENTO_ACESSORIO","fundamentacao_acessoria"],
+      "citacao": ["cita","mencao","CITACAO","cited","reference","referencia"],
+      "regulamentacao": ["regulamenta","REGULAMENTACAO","regulamentation"]
+    }
+  },
+
+  "tipo_relacao": {
+    "_canonicos": [
+      "referencia","altera","interrompe","recupera","retifica","anotacao_futura",
+      "regulamenta","cita","contradiz","precedente_de","uniformiza","interpretado_por"
+    ],
+    "_aliases": {
+      "altera": ["ALT","ALTERA","modifica","alteracao","MODIFICA"],
+      "interrompe": ["REV","REVOGA","SEF","revoga","revogacao","torna_sem_efeito","REVOGADA"],
+      "recupera": ["RVG","REVIGORA","revigorada","RECUPERA"],
+      "retifica": ["RET","RETIFICA","correcao"],
+      "referencia": ["REF","REFERENCIA","referencia_simples"],
+      "anotacao_futura": ["ANO","AGENDADA","FUTURA"]
+    }
+  },
+
+  "natureza_materia": {
+    "_canonicos": ["preliminar","prejudicial","merito","admissibilidade","orientacao","dispositivo"],
+    "_aliases": {
+      "merito": ["MERITO","mérito","mer","fundamento_merito"],
+      "preliminar": ["PRELIMINAR","prelim","preliminar_admissibilidade"],
+      "orientacao": ["ORIENTACAO","orientação","orient","resposta"],
+      "dispositivo": ["DISPOSITIVO","artigo","texto_normativo"]
+    }
+  },
+
+  "resultado": {
+    "_canonicos": [
+      "favoravel_contribuinte","favoravel_fazenda",
+      "parcialmente_favoravel_contribuinte","parcialmente_favoravel_fazenda",
+      "nulidade","nao_conhecido","nao_analisado_merito_prejudicado","diligencia","sem_resolucao",
+      "aplicavel","nao_aplicavel","aplicavel_parcial",
+      "vigente","revogado","alterado"
+    ],
+    "_aliases": {
+      "favoravel_contribuinte": ["favoravel ao contribuinte","FAVORAVEL_CONTRIBUINTE","contribuinte","provido"],
+      "favoravel_fazenda": ["favoravel a fazenda","FAVORAVEL_FAZENDA","fazenda","negado_provimento","negado"],
+      "aplicavel": ["aplica","APLICAVEL","sim","procedente"],
+      "nao_aplicavel": ["nao_aplica","NAO_APLICAVEL","nao","improcedente"],
+      "aplicavel_parcial": ["parcial","aplicavel_parcialmente","parcialmente_aplicavel","procedente_parcial"]
+    }
+  }
+}

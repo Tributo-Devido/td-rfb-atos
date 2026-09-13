@@ -11,33 +11,59 @@ O roteador da skill é o [`SKILL.md`](SKILL.md).
 
 ---
 
-## ⚠️ Este repositório ainda está incompleto
+## De onde veio
 
-Ele nasceu de um `git subtree split` do `Tributo-Devido/tdax-3.0`, que preservou a
-história — mas o `tdax-3.0` **nunca teve a skill inteira versionada**. O que estava
-lá eram o `SKILL.md` e quatro scripts de migração para a nuvem; o resto da skill vive
-apenas em `C:\td-skills\td-rfb-atos` na máquina do responsável.
+O repositório nasceu de um `git subtree split` do `Tributo-Devido/tdax-3.0`, que só tinha
+o `SKILL.md` e quatro scripts de migração para a nuvem. O resto da skill — pipeline de
+coleta, taxonomia, prompts, comandos e as migrations do schema local — vivia apenas em
+`C:\td-skills\td-rfb-atos`, fora do git. Foi trazido para cá em 12/09/2026. O que veio,
+o que não existia na origem e o que ficou pendente está em [`MIGRACAO.md`](MIGRACAO.md).
 
-Em números: o `SKILL.md` referencia oito arquivos que não existem aqui, e as sete
-etapas do pipeline diário (CRAWL → RELATE) não têm uma linha de código no git.
-
-**O que falta subir está listado em [`MIGRACAO.md`](MIGRACAO.md).** Até isso ser
-feito, tratar este repo como parcial: ele não reproduz o pipeline de coleta.
-
-## O que já está aqui
+## O que está aqui
 
 | caminho | o que é |
 |---|---|
 | `SKILL.md` | roteador da skill: arquitetura, modelo de dados, comandos |
+| `commands/` | os comandos `/td:rfb-atos:*` (setup, crawl, enrich, embed, buscar, pesquisar, pipeline, stats) |
+| `references/` | taxonomia (única fonte de verdade), prompts de extração, schemas por tema, arquitetura |
+| `scripts/run_pipeline.py` | pipeline diário: crawl → download → extract → categorize → embed |
+| `scripts/extract_sijut.py`, `fetch_normasinternet2.py` | coleta no SIJUT2 |
+| `scripts/download_pdf.py`, `extract_content.py` | PDF do ato e texto (MarkItDown) |
+| `scripts/categorize_with_llm.py`, `categorize_batch.py` | matérias via Haiku 4.5 (online e em lote) |
+| `scripts/embed_chunks.py`, `retrieve.py` | embeddings legados (Gemini 1024) e busca híbrida |
+| `scripts/timeline.py`, `detectar_conflitos.py`, `classificar_sinal_haiku.py` | linha do tempo, conflitos e sinal AUTORIZA/VEDA |
 | `scripts/db.py` | resolução de DSN + conexão (nuvem por padrão, `--local` para Docker) |
-| `scripts/migrate_to_cloud.py` | ETL Docker local → `ratio.rfb_atos` (idempotente) |
-| `scripts/reembed_cloud.py` | embeddings OpenAI 3072 em `ato_materia` (idempotente) |
-| `scripts/validate_cloud_parity.py` | paridade de contagens entre Docker e nuvem |
+| `scripts/migrate_to_cloud.py`, `reembed_cloud.py`, `validate_cloud_parity.py` | Docker local → `ratio.rfb_atos`, embeddings OpenAI 3072, paridade |
 | `scripts/auditar_cobertura.py` | **revisão de cobertura** — o funil e os defeitos D1-D8 |
 | `scripts/backfill_pdf.py` | **coleta do que falta** — proba o portal e registra o resultado |
-| `migrations/010_ato_coleta.sql` | estado de coleta por ato + view do funil + invariante |
+| `migrations/001` … `008` | schema do Postgres local (Docker 5435) |
+| `migrations/010_ato_coleta.sql` | nuvem: estado de coleta por ato + view do funil + invariante |
+| `docker-compose.yml` | Postgres local porta 5435 (legado do pipeline de coleta) |
 | `docs/REVISAO-COBERTURA.md` | runbook da revisão e da coleta |
+| `docs/DECISOES.md` | decisões tomadas e o porquê |
 | `tests/` | 46 testes contra Postgres real |
+
+Os scripts do pipeline de coleta não têm teste e estão dispensados só das regras
+cosméticas do lint (bloco "dívida declarada" no `pyproject.toml`). `reembed_cloud.py` e
+`validate_cloud_parity.py` ainda importam `lib.embed_openai`, que mora em `td-creditos` —
+não rodam sozinhos a partir deste repositório.
+
+## Dados fora do git
+
+| o quê | onde |
+|---|---|
+| lotes Anthropic (`batches/`, 4,6 GB) | `C:\td-rfb-atos-dados\batches\` |
+| acervo de PDFs (30.527 arquivos) | `C:\td-rfb-atos-dados\scripts\pdfs\` — `PDF_DIR` no `.env` |
+| resultados de lote (`results_*.jsonl`, `test_*.jsonl`), `in2121_original.json` | `C:\td-rfb-atos-dados\scripts\` |
+| logs | `C:\td-rfb-atos-dados\logs\` e `C:\td-rfb-atos-dados\scripts\logs\` — `LOG_DIR` |
+| estudos (`outputs/wip/<tema>/v1`, `v2`) | `C:\td-rfb-atos\outputs\` — dentro do repo, ignorado pelo git |
+| `scripts/.env` (chaves e DSN) | `C:\td-rfb-atos\scripts\.env` — ignorado pelo git |
+
+Os estudos ficam em `outputs/`, e não na pasta de dados, porque as referências do
+td-creditos e do td-mapeamento-fiscal os procuram em `td-rfb-atos/outputs/wip/<tema>/`.
+(O `/td:mapeamento:aplicar`, que também os lia, foi descontinuado em 12/09/2026 — as
+análises de PIS/COFINS passaram para o `/td-analise-piscofins:executar`.) Se devem ser versionados é decisão em aberto — ver
+[`docs/DECISOES.md`](docs/DECISOES.md).
 
 ## Revisão de cobertura — o problema central
 
@@ -69,12 +95,12 @@ ato ──▶ [1] PDF ──▶ [2] texto ──▶ [3] matéria ──▶ [4] e
         portal      ato_content   ato_materia     ato_materia.embedding
 ```
 
-| etapa | executa | está no git? |
-|---|---|---|
-| 1. ato → PDF | `scripts/backfill_pdf.py` | ✅ |
-| 2. PDF → `ato_content` | etapa EXTRACT (MarkItDown) | ❌ ver `MIGRACAO.md` |
-| 3. `ato_content` → `ato_materia` | etapa CATEGORIZE (Haiku 4.5) | ❌ ver `MIGRACAO.md` |
-| 4. `ato_materia` → embedding | `scripts/reembed_cloud.py` | ✅ |
+| etapa | executa |
+|---|---|
+| 1. ato → PDF | `scripts/backfill_pdf.py` (reparo) e `scripts/download_pdf.py` (coleta corrente) |
+| 2. PDF → `ato_content` | `scripts/extract_content.py` (MarkItDown) |
+| 3. `ato_content` → `ato_materia` | `scripts/categorize_with_llm.py` / `categorize_batch.py` (Haiku 4.5) |
+| 4. `ato_materia` → embedding | `scripts/reembed_cloud.py` |
 
 Detalhes, defeitos D1-D8 e ordem de prioridade em
 [`docs/REVISAO-COBERTURA.md`](docs/REVISAO-COBERTURA.md).

@@ -1,0 +1,92 @@
+{
+  "_versao": "1.0",
+  "_descricao": "Configuracao de pesos para ranking hibrido no retrieve.py. Ajustavel conforme dados de uso real. Documentacao completa em hierarquia_funcional.md.",
+
+  "rrf_k": 60,
+  "decay_recencia_anos_meia_vida": 15,
+
+  "natureza_por_tipo": {
+    "normativa": [
+      "INSTRUCAO_NORMATIVA","INSTRUCAO_NORMATIVA_CONJUNTA",
+      "DECRETO","PORTARIA_NORMATIVA","PORTARIA_INTERMINISTERIAL",
+      "RESOLUCAO",
+      "ATO_DECLARATORIO_INTERPRETATIVO","ATO_DECLARATORIO_NORMATIVO",
+      "NORMA_EXECUCAO","NORMA_EXECUCAO_CONJUNTA",
+      "PARECER_NORMATIVO"
+    ],
+    "consultiva": [
+      "SOLUCAO_CONSULTA","SOLUCAO_CONSULTA_INTERNA","SOLUCAO_DIVERGENCIA"
+    ],
+    "operacional": [
+      "ATO_DECLARATORIO","ATO_DECLARATORIO_EXECUTIVO","ATO_DECLARATORIO_EXECUTIVO_CONJUNTO",
+      "PORTARIA","PORTARIA_CONJUNTA",
+      "ORDEM_SERVICO","ORDEM_SERVICO_CONJUNTA",
+      "DECISAO","DESPACHO","DESPACHO_DECISORIO",
+      "TERMO_EXCLUSAO_SIMPLES",
+      "EDITAL_INTIMACAO","EDITAL_TRANSACAO_ADESAO",
+      "COMUNICADO","RECOMENDACAO","CONSULTA_PUBLICA",
+      "NOTA","NOTA_TECNICA","NOTA_CONJUNTA","NOTA_TECNICA_CONJUNTA",
+      "EXPOSICAO_MOTIVOS","ORIENTACAO_NORMATIVA",
+      "PARECER",
+      "ACORDAO_CARF"
+    ]
+  },
+
+  "modos": {
+    "pratico": {
+      "_descricao": "Default. Usuario quer 'como funciona / como e a regra atual'. Prioriza atos normativos.",
+      "natureza": { "normativa": 1.20, "consultiva": 1.05, "operacional": 0.50 }
+    },
+    "consultivo": {
+      "_descricao": "Usuario quer 'como a RFB respondeu casos parecidos'. Prioriza SCs e SDs.",
+      "natureza": { "normativa": 1.05, "consultiva": 1.20, "operacional": 0.30 }
+    },
+    "operacional": {
+      "_descricao": "Usuario quer ato administrativo pontual (habilitacao, exclusao, nomeacao).",
+      "natureza": { "normativa": 0.70, "consultiva": 0.70, "operacional": 1.20 }
+    },
+    "historico": {
+      "_descricao": "Estudo retrospectivo da evolucao de uma materia. Recomendado usar com --vigente-em <data>.",
+      "natureza": { "normativa": 1.00, "consultiva": 1.00, "operacional": 0.70 }
+    }
+  },
+
+  "boost_secundario": {
+    "_descricao": "Multiplica o score apos peso de natureza. Aplicado por (natureza, tipo_ato, orgao_emissor).",
+    "consultiva": {
+      "SOLUCAO_DIVERGENCIA": 1.15,
+      "SOLUCAO_CONSULTA": {
+        "_default": 1.00,
+        "COSIT": 1.10,
+        "COANA": 1.10
+      },
+      "SOLUCAO_CONSULTA_INTERNA": 1.10
+    },
+    "normativa": {
+      "INSTRUCAO_NORMATIVA": 1.05,
+      "DECRETO": 1.05,
+      "PARECER_NORMATIVO": 1.05
+    }
+  },
+
+  "peso_status_vigencia": {
+    "vigente_nunca_alterado": 1.00,
+    "vigente_alterado": 0.95,
+    "revigorado": 1.00,
+    "retificador": 0.70,
+    "nao_vigente": 0.40,
+    "publicacao_repetida": 0.0,
+    "nao_disponivel_portal": 0.0,
+    "_default": 1.00
+  },
+
+  "boost_marco": {
+    "_descricao": "Adicionado ao score quando a materia tem fundamentacao_externa do tipo abaixo. Sinaliza que o ato cita marco juridico relevante.",
+    "tema_stf": 0.10,
+    "tema_stj": 0.10,
+    "sumula_carf": 0.08,
+    "sumula_vinculante": 0.10,
+    "sumula_stf": 0.08,
+    "sumula_stj": 0.08
+  }
+}
