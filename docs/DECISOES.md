@@ -66,3 +66,59 @@ mas perde a correspondência 1:1 com o que os scripts e os handoffs antigos cita
 relativo; com espelho, ela é mecânica.
 
 **O que derrubaria.** Mudança dos dados para S3 — aí o layout é o do bucket.
+
+---
+
+## 2026-09-13 · Recoleta: revogados entram por área de espera e só sobem depois do consumidor
+
+**Decisão.** Aprovada pelo dono a v2 do plano (`docs/PLANO-RECOLETA-2026-09-v2.md`): atos não
+vigentes recoletados vão para o schema `rfb_atos_staging` e só são promovidos às tabelas que o time
+lê depois que o td-analise-piscofins ganhar o parâmetro `vigente_em` e o time atualizar; a promoção é
+em duas etapas (ato/texto/relações primeiro; matérias e vetores depois).
+
+**Alternativas descartadas.**
+- *Carregar direto nas tabelas principais* (v1): reprovado pelos três revisores — as buscas do
+  `atos_rfb.py` não filtram vigência; ato revogado ocupa o top-k e é citado como vigente por quem não atualizou.
+- *View de compatibilidade renomeando as tabelas* (Gemini): exige renomear tabelas que o consumidor
+  lê pelo nome; mais invasivo que a área de espera.
+
+**Porquê.** O banco é compartilhado pelo time inteiro; "aditivo no schema" não é "aditivo no comportamento".
+
+**O que derrubaria.** Se o release com `vigente_em` não for adotado, os não vigentes ficam presos na
+área de espera — aceitável: é o estado de hoje, com o dado já coletado.
+
+---
+
+## 2026-09-13 · Vocabulário do portal para vigência; revogação é `interrompe`
+
+**Decisão.** `status_vigencia` usa só valores do portal (`nao_vigente`, `anulada`, `revigorado`…); a
+revogação é a aresta `interrompe` (corSimbolo 3); "revogado" é derivado na leitura. A situação bruta
+do portal fica em `ato.situacao_portal`.
+
+**Alternativa descartada.** Status novo `revogado` e aresta `revoga` (v1): o portal não os tem, e o
+consumidor declara `revoga` como família ausente (`atos_rfb.py:847`) — gravar `revoga` mudaria o
+comportamento e quebraria teste do time.
+
+**O que derrubaria.** Documentação oficial do SIJUT distinguindo revogação de outras perdas de efeito
+num campo próprio — aí o campo passa a ser gravado.
+
+---
+
+## 2026-09-13 · Categorização: Sonnet na cadeia de PIS/COFINS, Haiku na massa
+
+**Decisão.** O dono escolheu Sonnet. Aplicado às INs centrais de PIS/COFINS (247, 457, 660, 1.717,
+1.911, 2.121); a massa segue no Haiku 4.5, como a base atual. `llm_model` registra o modelo por matéria.
+
+**Alternativa em aberto.** Sonnet em tudo (proposta do Gemini) — custo de centenas de dólares em vez
+de dezenas; o dono pode estender.
+
+---
+
+## 2026-09-13 · Credencial de escrita própria: `rfb_writer`, sem DELETE nas tabelas principais
+
+**Decisão.** Aprovado pelo dono: usuário `rfb_writer` herdando `ratio_leitura`, com `INSERT/UPDATE`
+em `rfb_atos.*` e `DELETE` só na área de espera; DSN no SSM `/td/batch/rfb-writer-dsn`. O `db.py`
+passa a resolver variável de ambiente → SSM, sem arquivo local.
+
+**Alternativa descartada.** Escrever como `ratio_admin` (`/td/admin/...`): contraria o padrão "uma
+credencial por vertical" do runbook e dá privilégio de DDL a scripts de coleta.
