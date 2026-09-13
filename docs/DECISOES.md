@@ -211,3 +211,33 @@ e `ementa_trecho` não os substitui.
 
 **O que derrubaria.** Consulta do time por dispositivo de lei (ex.: Lei 10.833, art. 3º) sendo
 poluída — não acontece: a linha nova tem a referência da própria IN, não a da lei.
+
+---
+
+## 2026-09-13 · Conferir antes de gravar (`--gerar`), resposta validada, hash do teor, saída 1
+
+**Decisão.** Revisão 4-LLM da versão 2 (Codex): como o `rfb_writer` não apaga, a conferência vem
+**antes** da gravação, não depois.
+- `--gerar` chama o modelo e escreve um relatório (matérias por parte, temas repetidos, artigos do
+  ato citados pelas matérias, partes sem matéria, divergências entre partes) em
+  `RFB_ATOS_DADOS/categorizacao/<ato>/`, **sem gravar**. O `--executar` depois reaproveita as
+  respostas guardadas: as matérias não são pagas de novo.
+- Resposta do modelo é validada (lista de matérias; cada uma com tema e com solução, trecho ou
+  fundamentação); a reprovada não fica em disco e derruba o ato. Parte sem matéria e divergência de
+  eficácia ficam registradas; eficácia divergente não é gravada.
+- Na gravação, o hash do teor analisado é conferido com a linha do teor travada (`FOR SHARE`).
+- As permissões do usuário são conferidas antes de chamar o modelo; os testes rodam como
+  `rfb_writer`, com os mesmos GRANTs da nuvem.
+- O script sai com código 1 se algum ato falhou ou ficou sem sinal/vetor.
+
+**Consolidação das matérias — reaberta, na forma conservadora.** O Codex propôs remover só
+duplicatas equivalentes (tema + tributo + regime, com os artigos como evidência) e manter matérias
+diferentes. Não entra antes de medir: o relatório do `--gerar` da IN 2.121 (temas repetidos e
+cobertura de artigos) decide. Isto substitui o "conferir depois da primeira execução" da entrada de
+partição acima.
+
+**Alternativa descartada.** Conferir depois de gravar (versões 1 e 2): um erro exigiria o admin
+para apagar as matérias.
+
+**O que derrubaria.** Relatório com cobertura de artigos baixa, partes sem matéria ou temas
+repetidos com conteúdo equivalente — aí a reconciliação é feita antes do `--executar`.

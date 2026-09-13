@@ -1,8 +1,8 @@
 """categorizar_nuvem.py — partição do texto, matérias, gravação, sinal e vetor.
 
 As funções puras rodam sempre. As de banco só com PGTEST_DSN (banco descartável: derrubam os schemas
-rfb_atos e rfb_atos_staging). O modelo e os vetores são falsos, injetados: nenhum teste chama API
-paga.
+rfb_atos e rfb_atos_staging) e rodam como `rfb_writer`, com os mesmos GRANTs da nuvem. O modelo e os
+vetores são falsos, injetados: nenhum teste chama API paga.
 """
 from __future__ import annotations
 
@@ -57,11 +57,13 @@ def _materia(n: int, *, com_solucao: bool = True) -> dict:
 
 
 class FalsoModelo:
-    """Faz as vezes da API: uma matéria por chamada; o sinal responde VEDA."""
+    """Faz as vezes da API: uma matéria por chamada (a matéria k cita o art. k do ato); o sinal
+    responde VEDA. `corpo(n)` troca a resposta da chamada n (None = a padrão)."""
 
     def __init__(self, *, falhar_na: int | None = None, cortar_acima: int | None = None,
-                 com_solucao: bool = True):
+                 com_solucao: bool = True, corpo=None):
         self.falhar_na, self.cortar_acima, self.com_solucao = falhar_na, cortar_acima, com_solucao
+        self.corpo = corpo
         self.mensagens: list[str] = []
         self.sistemas: list[list[dict]] = []
         self.sinais = 0
@@ -77,6 +79,8 @@ class FalsoModelo:
             return cn.Resposta("desculpe, não consigo", "end_turn", {})
         if self.cortar_acima and len(usuario) > self.cortar_acima:
             return cn.Resposta('{"materias": [', "max_tokens", {"saida": cn.MAX_TOKENS})
+        if self.corpo is not None and (outro := self.corpo(n)) is not None:
+            return cn.Resposta(json.dumps(outro, ensure_ascii=False), "end_turn", {"saida": 5})
         corpo = {"ato_metadata": {"eficacia": "vinculante_geral",
                                   "norma_base_regulamentada": [{"referencia": "Lei 10.833/2003"}]},
                  "materias": [_materia(n, com_solucao=self.com_solucao)],
@@ -88,6 +92,10 @@ class FalsoModelo:
 
 def _vetores(textos: list[str]) -> list[list[float]]:
     return [[0.001] * cn.DEFAULT_DIM for _ in textos]
+
+
+def _mudo(_texto: str) -> None:
+    return None
 
 
 @pytest.fixture(autouse=True)
@@ -181,6 +189,35 @@ def test_interpreta_json_com_cercas_e_recusa_texto_solto():
         cn.interpretar("sem json aqui")
 
 
+def test_resposta_mal_formada_derruba_o_ato_e_nao_fica_em_disco():
+    """Revisão 4-LLM (Codex): JSON válido não basta — lista de matérias, tema e conteúdo."""
+    ruins = [{"materias": "erro"}, {"materias": [{"solucao": "sem tema"}]},
+             {"materias": [{"tema_macro": "CREDITAMENTO"}]}, {"materias": ["texto solto"]},
+             {"materias": [], "ato_metadata": "texto"}]
+    for ruim in ruins:
+        modelo = FalsoModelo(corpo=lambda _n, r=ruim: r)
+        for _ in range(2):
+            with pytest.raises(cn.FalhaCategorizacao):
+                cn.categorizar(_ato(), "Art. 1º Curto.", modelo, modelo=cn.MODELO_MASSA,
+                               uso=cn.Uso())
+        assert len(modelo.mensagens) == 2, ruim     # não ficou em disco: pediu de novo
+
+
+def test_parte_sem_materia_fica_registrada():
+    modelo = FalsoModelo(corpo=lambda n: {"materias": []} if n == 2 else None)
+    materias, meta = cn.categorizar(_ato(), _texto_longo(), modelo, modelo=cn.MODELO_MASSA,
+                                    uso=cn.Uso(), limite=5000)
+    assert meta["partes_sem_materia"] == ["2"] and len(materias) == meta["partes"] - 1
+
+
+def test_divergencia_entre_partes_fica_registrada():
+    saidas = [{"_parte": "1", "materias": [], "ato_metadata": {"eficacia": "vinculante_geral"}},
+              {"_parte": "2", "materias": [], "ato_metadata": {"eficacia": "normativa"}}]
+    _, meta = cn.juntar(saidas)
+    assert meta["divergencias"] == {"eficacia": ["vinculante_geral", "normativa"]}
+    assert meta["partes_sem_materia"] == ["1", "2"]
+
+
 def test_materia_normalizada_com_tributo_composto_separado():
     linha = cn.linha_materia(_materia(1), 7)
     assert linha["ordem"] == 7
@@ -202,6 +239,8 @@ def test_tributo_sem_codigo_ou_rejeitado_nao_vira_linha():
 
 
 def test_artigos_do_proprio_ato_viram_dispositivo_casavel():
+    # formato conferido contra o atos_rfb.normalizar_norma/normalizar_dispositivo do
+    # td-analise-piscofins em 13/09/2026: IN 2121/2022 e art:171|par:2|inc:iv|ali:a
     norma = cn.norma_do_ato(_ato())
     assert norma == ("instrucao_normativa", REFERENCIA_IN)   # "2.121": sem o ponto vira 212
     m = {**_materia(1), "dispositivos_do_ato": [
@@ -219,8 +258,9 @@ def test_varias_partes_numeradas_e_metadados_juntos():
     assert meta["partes"] == meta["chamadas"] == len(modelo.mensagens) == len(materias) > 1
     assert "PARTE 2 de" in modelo.mensagens[1] and "<br>" not in modelo.mensagens[1]
     assert "CONTEUDO COMPLETO" not in modelo.mensagens[1]
-    assert meta["eficacia"] == "vinculante_geral"
+    assert meta["eficacia"] == "vinculante_geral" and "divergencias" not in meta
     assert meta["norma_base_regulamentada"] == [{"referencia": "Lei 10.833/2003"}]
+    assert [m["_parte"] for m in materias] == [str(i) for i in range(1, len(materias) + 1)]
 
 
 def test_resposta_cortada_divide_a_parte_em_duas():
@@ -263,6 +303,15 @@ def test_tipo_da_coluna_de_vetor_so_passa_o_esperado():
             cn._cast_embedding(ruim)
 
 
+def test_codigo_de_saida_nao_deixa_lote_com_falha_parecer_sucesso():
+    """Revisão 4-LLM (Codex): o lote terminava com saída 0 mesmo com erro."""
+    ok = {"ato_id": 1, "sem_sinal": 0, "sem_vetor": 0}
+    assert cn.codigo_saida([ok]) == 0
+    assert cn.codigo_saida([ok, {"ato_id": 2, "erro": "x"}]) == 1
+    assert cn.codigo_saida([{**ok, "sem_vetor": 2}]) == 1
+    assert cn.codigo_saida([{**ok, "sem_vetor": 2}], vetor=False) == 0
+
+
 def test_plano_estima_partes_e_custo():
     e = cn.estimar({**_ato(), "texto_completo": _texto_longo(titulos=40, artigos=30)},
                    cn.MODELO_CADEIA)
@@ -270,8 +319,28 @@ def test_plano_estima_partes_e_custo():
 
 
 # ---------------------------------------------------------------------------
-# Banco
+# Banco — como rfb_writer
 # ---------------------------------------------------------------------------
+
+# Os mesmos GRANTs que criaram o rfb_writer na nuvem em 13/09/2026, na mesma ordem (antes das
+# migrations 010 e 011, que concedem as tabelas novas). Papéis valem para o cluster todo.
+PAPEIS_DA_NUVEM = """
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ratio_leitura') THEN
+        CREATE ROLE ratio_leitura NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rfb_writer') THEN
+        CREATE ROLE rfb_writer NOLOGIN;
+    END IF;
+END $$;
+GRANT ratio_leitura TO rfb_writer;
+GRANT USAGE ON SCHEMA rfb_atos TO ratio_leitura, rfb_writer;
+GRANT SELECT ON ALL TABLES IN SCHEMA rfb_atos TO ratio_leitura;
+GRANT INSERT, UPDATE ON ALL TABLES IN SCHEMA rfb_atos TO rfb_writer;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA rfb_atos TO rfb_writer;
+"""
+
 
 def _limpar(conn) -> None:
     conn.execute("DROP SCHEMA IF EXISTS rfb_atos_staging CASCADE")
@@ -297,10 +366,15 @@ def conn():
                   "'Consolida PIS/COFINS.', true, false)", (ATO,))
         c.execute("INSERT INTO rfb_atos.ato_content (ato_id, texto_completo, caracteres) "
                   "VALUES (%s, %s, %s)", (ATO, texto, len(texto)))
+        c.execute(PAPEIS_DA_NUVEM)
         _executar(c, "migrations/010_ato_coleta.sql")
         _executar(c, "migrations/011_recoleta.sql")
-        yield c
-        _limpar(c)
+        c.execute("SET ROLE rfb_writer")
+        try:
+            yield c
+        finally:
+            c.execute("RESET ROLE")
+            _limpar(c)
 
 
 def _processar(conn, modelo=None, run_id="t1", embed=_vetores):
@@ -311,6 +385,14 @@ def _processar(conn, modelo=None, run_id="t1", embed=_vetores):
 
 def _um(conn, sql: str, *params):
     return conn.execute(sql, params).fetchone()
+
+
+@precisa_banco
+def test_permissoes_do_rfb_writer_bastam_e_as_do_leitor_nao(conn):
+    cn.exigir_permissoes(conn)                     # rfb_writer: passa
+    conn.execute("SET ROLE ratio_leitura")
+    with pytest.raises(cn.SemPermissao, match=r"INSERT em rfb_atos\.ato_materia"):
+        cn.exigir_permissoes(conn)
 
 
 @precisa_banco
@@ -352,12 +434,36 @@ def test_grava_materias_sinal_e_vetor_e_nenhuma_relacao(conn):
     assert _um(conn, "SELECT analise_completa, eficacia_atual, "
                      "metadados->'categorizacao'->>'modelo' FROM rfb_atos.ato WHERE id = %s",
                ATO) == (True, "vinculante_geral", cn.MODELO_CADEIA)
+    texto = _um(conn, "SELECT texto_completo FROM rfb_atos.ato_content WHERE ato_id = %s", ATO)[0]
+    assert _um(conn, "SELECT metadados->'categorizacao'->>'texto_sha256' FROM rfb_atos.ato "
+                     "WHERE id = %s", ATO) == (cn._sha256(texto),)
     assert {r[0] for r in conn.execute(
         "SELECT campo FROM rfb_atos.ato_mudanca WHERE run_id = 't1'")} == {
         "analise_completa", "eficacia_atual", "metadados.categorizacao", "ids"}
     # a matéria antiga sem vetor (seed, ato 3) não é tocada: o vetor é só das matérias do ato
     assert _um(conn, "SELECT embedding FROM rfb_atos.ato_materia WHERE ato_id = 3 AND ordem = 2"
                ) == (None,)
+
+
+@precisa_banco
+def test_gerar_faz_relatorio_sem_gravar_e_executar_reaproveita(conn):
+    """Revisão 4-LLM (Codex): o rfb_writer não apaga — conferir antes de gravar."""
+    modelo = FalsoModelo()
+    resultado = cn.gerar(cn.carregar_atos(conn, ids=[ATO]), modelo, run_id="g1", uso=cn.Uso(),
+                         limite=5000, saida=_mudo)[0]
+    n = len(modelo.mensagens)
+    assert resultado["materias"] == n and resultado["artigos_no_texto"] == 36
+    assert resultado["artigos_citados"] == n          # a matéria k cita o art. k
+    assert resultado["temas_repetidos"] == {"CREDITAMENTO.CONCEITO_INSUMO": n}
+    relatorio = Path(resultado["relatorio"])
+    assert "nada foi gravado no banco" in relatorio.read_text(encoding="utf-8")
+    assert relatorio.with_suffix(".json").exists()
+    assert _um(conn, "SELECT count(*) FROM rfb_atos.ato_materia WHERE ato_id = %s", ATO) == (0,)
+    assert _um(conn, "SELECT analise_completa FROM rfb_atos.ato WHERE id = %s", ATO) == (False,)
+
+    gravado = cn.executar_lote(conn, cn.carregar_atos(conn, ids=[ATO]), modelo, run_id="e1",
+                               uso=cn.Uso(), embed=_vetores, limite=5000, saida=_mudo)[0]
+    assert len(modelo.mensagens) == n and gravado["materias"] == n   # nenhuma chamada nova
 
 
 @precisa_banco
@@ -386,6 +492,15 @@ def test_falha_numa_parte_nao_grava_nada(conn):
 
 
 @precisa_banco
+def test_texto_trocado_durante_a_categorizacao_aborta(conn):
+    """Revisão 4-LLM (Codex): o teor analisado tem que ser o que está no banco na gravação."""
+    with pytest.raises(cn.AtoInapto, match="texto mudou"):
+        cn.persistir(conn, ATO, [cn.linha_materia(_materia(1), 1)], {"texto_sha256": "0" * 64},
+                     modelo="m", run_id="h")
+    assert _um(conn, "SELECT count(*) FROM rfb_atos.ato_materia WHERE ato_id = %s", ATO) == (0,)
+
+
+@precisa_banco
 def test_erro_inesperado_num_ato_nao_derruba_o_lote(conn):
     """Revisão 4-LLM (Grok): uma falha fora de AtoInapto/FalhaCategorizacao (API de vetor fora do
     ar, por exemplo) parava o lote inteiro."""
@@ -399,12 +514,14 @@ def test_erro_inesperado_num_ato_nao_derruba_o_lote(conn):
 
     atos = cn.carregar_atos(conn, ids=[2, ATO])        # ato 2 (seed) vem primeiro e falha
     resultados = cn.executar_lote(conn, atos, FalsoModelo(), run_id="lote", uso=cn.Uso(),
-                                  embed=vetor_instavel, limite=5000, saida=lambda _: None)
+                                  embed=vetor_instavel, limite=5000, saida=_mudo)
     assert resultados[0]["erro"].startswith("RuntimeError") and resultados[1]["materias"] > 1
+    assert cn.codigo_saida(resultados) == 1
     # as matérias do ato 2 ficaram, sem vetor; rodar de novo completa sem pedir matéria de novo
     de_novo = cn.executar_lote(conn, cn.carregar_atos(conn, ids=[2]), FalsoModelo(),
-                               run_id="lote2", uso=cn.Uso(), embed=_vetores, saida=lambda _: None)
+                               run_id="lote2", uso=cn.Uso(), embed=_vetores, saida=_mudo)
     assert de_novo[0]["categorizado_agora"] is False and de_novo[0]["sem_vetor"] == 0
+    assert cn.codigo_saida(de_novo) == 0
 
 
 @precisa_banco
@@ -432,6 +549,13 @@ def test_eficacia_existente_nao_e_sobrescrita(conn):
         "normativa",)
     assert _um(conn, "SELECT count(*) FROM rfb_atos.ato_mudanca WHERE campo = 'eficacia_atual'"
                ) == (0,)
+
+
+@precisa_banco
+def test_eficacia_divergente_entre_partes_nao_e_gravada(conn):
+    meta = {"eficacia": "vinculante_geral", "divergencias": {"eficacia": ["vinculante_geral", "x"]}}
+    cn.persistir(conn, ATO, [cn.linha_materia(_materia(1), 1)], meta, modelo="m", run_id="d")
+    assert _um(conn, "SELECT eficacia_atual FROM rfb_atos.ato WHERE id = %s", ATO) == (None,)
 
 
 @precisa_banco

@@ -27,7 +27,8 @@ vezes. Toda alteração em linha existente vai para `ato_mudanca` com o run_id (
 
 Uso:
     python categorizar_nuvem.py --ato 16630             # plano: partes, modelo, custo estimado
-    python categorizar_nuvem.py --ato 16630 --executar  # chama os modelos e grava como rfb_writer
+    python categorizar_nuvem.py --ato 16630 --gerar     # chama o modelo, relatório; NÃO grava
+    python categorizar_nuvem.py --ato 16630 --executar  # grava (rfb_writer), reusa o --gerar
     python categorizar_nuvem.py --pendentes --limit 20  # fila: com texto, sem análise, sem matéria
 """
 from __future__ import annotations
@@ -41,6 +42,7 @@ import re
 import sys
 import time
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -115,6 +117,10 @@ class FalhaCategorizacao(RuntimeError):
 
 class AtoInapto(RuntimeError):
     """O ato não está em condição de ser categorizado (sem texto, já analisado, já com matéria)."""
+
+
+class SemPermissao(RuntimeError):
+    """O usuário do banco não pode gravar o que a categorização grava."""
 
 
 # ---------------------------------------------------------------------------
@@ -412,11 +418,36 @@ def interpretar(texto: str) -> dict:
     return json.loads(texto[ini:fim + 1])
 
 
+def _tem_texto(v) -> bool:
+    return isinstance(v, str) and bool(v.strip())
+
+
+def validar_saida(d) -> dict:
+    """Estrutura mínima da resposta (revisão 4-LLM, Codex: JSON válido não basta). Resposta
+    reprovada não fica em disco e derruba o ato — nada é gravado."""
+    if not isinstance(d, dict):
+        raise ValueError("a resposta não é um objeto")
+    materias = d.get("materias")
+    if not isinstance(materias, list):
+        raise ValueError("'materias' ausente ou não é lista")
+    for i, m in enumerate(materias, 1):
+        if not isinstance(m, dict):
+            raise ValueError(f"matéria {i} não é objeto")
+        if not (_tem_texto(m.get("tema_macro")) or _tem_texto(m.get("tema_especifico"))):
+            raise ValueError(f"matéria {i} sem tema")
+        if not any(_tem_texto(m.get(c)) for c in ("solucao", "ementa_trecho",
+                                                  "fundamentacao_resumo")):
+            raise ValueError(f"matéria {i} sem solução, trecho nem fundamentação")
+    if d.get("ato_metadata") is not None and not isinstance(d["ato_metadata"], dict):
+        raise ValueError("'ato_metadata' não é objeto")
+    return d
+
+
 def _materias_legiveis(r: Resposta) -> bool:
     if r.parada == "max_tokens":
         return False
     try:
-        interpretar(r.texto)
+        validar_saida(interpretar(r.texto))
     except ValueError:
         return False
     return True
@@ -439,26 +470,39 @@ def _categorizar_parte(ato: dict, parte: Parte, total: int, sistema: list[dict],
                                          profundidade=profundidade + 1)
         return saidas
     try:
-        return [interpretar(r.texto)]
+        saida = validar_saida(interpretar(r.texto))
     except ValueError as e:
-        raise FalhaCategorizacao(f"parte {parte.rotulo}: resposta sem JSON válido ({e})") from e
+        raise FalhaCategorizacao(f"parte {parte.rotulo}: resposta inválida ({e})") from e
+    for m in saida["materias"]:
+        m["_parte"] = parte.rotulo
+    return [{**saida, "_parte": parte.rotulo}]
 
 
 def juntar(saidas: list[dict]) -> tuple[list[dict], dict]:
-    """Matérias de todas as partes, na ordem, e os metadados do ato (primeiro valor que vier)."""
-    materias = [m for s in saidas for m in (s.get("materias") or []) if isinstance(m, dict)]
+    """Matérias de todas as partes, na ordem, e os metadados do ato. Divergência entre partes e
+    parte sem matéria ficam registradas em `meta` (não somem em silêncio)."""
+    materias = [m for s in saidas for m in s["materias"]]
     meta: dict = {}
+    valores: dict[str, list] = {"eficacia": [], "abrangencia": []}
     normas: list = []
     for s in saidas:
         md = s.get("ato_metadata") or {}
-        for chave in ("eficacia", "abrangencia"):
-            if md.get(chave) and chave not in meta:
-                meta[chave] = md[chave]
+        for chave, vistos in valores.items():
+            if md.get(chave) and md[chave] not in vistos:
+                vistos.append(md[chave])
         for n in md.get("norma_base_regulamentada") or []:
             if isinstance(n, dict) and n not in normas:
                 normas.append(n)
+    for chave, vistos in valores.items():
+        if vistos:
+            meta[chave] = vistos[0]
+        if len(vistos) > 1:
+            meta.setdefault("divergencias", {})[chave] = vistos
     if normas:
         meta["norma_base_regulamentada"] = normas
+    vazias = [s["_parte"] for s in saidas if not s["materias"]]
+    if vazias:
+        meta["partes_sem_materia"] = vazias
     return materias, meta
 
 
@@ -615,6 +659,10 @@ def _json(valor):
     return valor.isoformat() if isinstance(valor, date) else valor
 
 
+def _sha256(texto: str) -> str:
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
 def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: str,
               run_id: str) -> list[int]:
     """Grava as matérias e marca o ato como analisado, numa transação. Devolve os ids novos."""
@@ -632,6 +680,15 @@ def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: st
             raise AtoInapto(f"ato {ato_id} sem texto (content_disponivel = false)")
         if analisado:
             raise AtoInapto(f"ato {ato_id} já está com analise_completa")
+        if meta.get("texto_sha256"):
+            # o texto pode ter mudado durante as chamadas (recoleta concorrente): trava a linha
+            # do teor e confere o hash do que foi analisado
+            atual = conn.execute(
+                "SELECT encode(sha256(convert_to(texto_completo, 'UTF8')), 'hex') FROM "
+                "rfb_atos.ato_content WHERE ato_id = %s FOR SHARE", (ato_id,)).fetchone()
+            if not atual or atual[0] != meta["texto_sha256"]:
+                raise AtoInapto(f"ato {ato_id}: o texto mudou durante a categorização; rode de "
+                                "novo")
         if conn.execute("SELECT 1 FROM rfb_atos.ato_materia WHERE ato_id = %s LIMIT 1",
                         (ato_id,)).fetchone():
             raise AtoInapto(f"ato {ato_id} já tem matéria: recategorizar exige apagar, e o "
@@ -658,7 +715,9 @@ def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: st
                     [(mid, codigo, *resto) for codigo, resto in m["_cnaes"].items()])
 
         categorizacao = {"run_id": run_id, "modelo": modelo, "materias": len(ids), **meta}
-        nova_eficacia = eficacia or meta.get("eficacia")
+        # eficácia só se o ato não tem e as partes concordam
+        proposta = None if "eficacia" in meta.get("divergencias", {}) else meta.get("eficacia")
+        nova_eficacia = eficacia or proposta
         conn.execute(
             "UPDATE rfb_atos.ato SET analise_completa = true, eficacia_atual = %s, "
             "metadados = COALESCE(metadados, '{}'::jsonb) || %s, atualizado_em = now() "
@@ -773,6 +832,7 @@ def processar_ato(conn, ato: dict, chamar, *, modelo: str, run_id: str, uso: Uso
             raise AtoInapto(f"ato {ato['id']} já está com analise_completa")
         materias, meta = categorizar(ato, ato["texto_completo"], chamar, modelo=modelo, uso=uso,
                                      limite=limite)
+        meta["texto_sha256"] = _sha256(ato["texto_completo"])
         norma = norma_do_ato(ato)
         linhas = [linha_materia(m, i, norma) for i, m in enumerate(materias, 1)]
         ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id)
@@ -814,6 +874,137 @@ def executar_lote(conn, atos: list[dict], chamar, *, run_id: str, uso: Uso,
         saida(f"[ok] run {run_id}: {resumo}")
         resultados.append(resumo)
     return resultados
+
+
+# ---------------------------------------------------------------------------
+# Conferir antes de gravar (--gerar)
+# ---------------------------------------------------------------------------
+
+_NUM_ARTIGO = re.compile(r"\s*(?:art(?:igo)?\.?\s*)?(\d+)\s*[ºo°]?\s*(?:-\s*([a-z]))?",
+                         re.IGNORECASE)
+
+
+def _num_artigo(rotulo) -> str | None:
+    m = _NUM_ARTIGO.match(str(rotulo or ""))
+    return (m.group(1) + (f"-{m.group(2).lower()}" if m.group(2) else "")) if m else None
+
+
+def relatorio(ato: dict, materias: list[dict], linhas: list[dict], meta: dict,
+              modelo: str) -> dict:
+    """O que conferir antes de gravar: matérias por parte, temas repetidos, artigos do ato citados,
+    divergências. Revisão 4-LLM (Codex): o rfb_writer não apaga, então a conferência vem antes."""
+    blocos = texto_para_llm(ato["texto_completo"]).split("\n\n")
+    artigos = {n for b in blocos if (a := _ARTIGO_NUM.match(b)) and (n := _num_artigo(a.group(1)))}
+    cobertos = {n for m in materias for d in (m.get("dispositivos_do_ato") or [])
+                if isinstance(d, dict) and (n := _num_artigo(d.get("artigo")))}
+    temas = Counter(linha["tema_especifico"] for linha in linhas)
+    citados = len(cobertos & artigos)
+    resumo = {
+        "materias": len(linhas), "partes": meta.get("partes"), "chamadas": meta.get("chamadas"),
+        "artigos_no_texto": len(artigos), "artigos_citados": citados,
+        "cobertura_artigos": round(citados / len(artigos), 3) if artigos else None,
+        "temas_repetidos": {t: n for t, n in temas.most_common() if n > 1},
+        "partes_sem_materia": meta.get("partes_sem_materia", []),
+        "divergencias": meta.get("divergencias", {}),
+        "sem_solucao": sum(1 for linha in linhas if not linha["solucao"]),
+        "sem_tributo": sum(1 for linha in linhas if not linha["tributos"]),
+        "tema_fora_da_taxonomia": sum(1 for linha in linhas
+                                      if linha["tema_macro"] == "__NOVO_TEMA"),
+    }
+    return {"ato_id": ato["id"], "modelo": modelo, "resumo": resumo, "materias": [
+        {"parte": m.get("_parte"), **{k: v for k, v in linha.items() if not k.startswith("_")},
+         "dispositivos": linha["_dispositivos"], "cnaes": linha["_cnaes"]}
+        for linha, m in zip(linhas, materias, strict=True)]}
+
+
+def escrever_relatorio(ato: dict, run_id: str, rel: dict) -> Path:
+    """JSON (máquina) e Markdown (para ler) em RFB_ATOS_DADOS/categorizacao/<ato>/."""
+    pasta = _dir_respostas(ato["id"])
+    pasta.mkdir(parents=True, exist_ok=True)
+    (pasta / f"relatorio-{run_id}.json").write_text(
+        json.dumps(rel, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    r = rel["resumo"]
+    cobertura = f" ({r['cobertura_artigos']:.0%})" if r["cobertura_artigos"] is not None else ""
+    repetidos = ", ".join(f"{t} ({n})" for t, n in r["temas_repetidos"].items()) or "nenhum"
+    texto = [
+        f"# Categorização para conferir — ato {ato['id']} "
+        f"({ato['tipo_ato']} {ato['numero']}/{ato['ano']})", "",
+        f"Modelo {rel['modelo']} · run {run_id} · **nada foi gravado no banco**.", "",
+        f"- **Matérias:** {r['materias']} em {r['partes']} partes ({r['chamadas']} chamadas)",
+        f"- **Artigos do ato citados pelas matérias:** {r['artigos_citados']} de "
+        f"{r['artigos_no_texto']}{cobertura}",
+        f"- **Partes sem matéria:** {', '.join(r['partes_sem_materia']) or 'nenhuma'}",
+        f"- **Temas repetidos:** {repetidos}",
+        f"- **Divergências entre partes:** {r['divergencias'] or 'nenhuma'}",
+        f"- **Sem solução:** {r['sem_solucao']} · **sem tributo:** {r['sem_tributo']} · "
+        f"**tema fora da taxonomia:** {r['tema_fora_da_taxonomia']}", "", "## Matérias", ""]
+    for m in rel["materias"]:
+        proprios = [d[2] for d in m["dispositivos"] if d[4] == "dispositivo_do_ato"]
+        texto += [f"### {m['ordem']}. {m['tema_especifico']} (parte {m['parte']})",
+                  f"Tributos: {', '.join(m['tributos']) or '—'} · artigos: "
+                  f"{'; '.join(proprios) or '—'}", "",
+                  (m["solucao"] or m["ementa_trecho"] or "").strip()[:600], ""]
+    caminho = pasta / f"relatorio-{run_id}.md"
+    caminho.write_text("\n".join(texto), encoding="utf-8")
+    return caminho
+
+
+def gerar(atos: list[dict], chamar, *, run_id: str, uso: Uso, modelo: str | None = None,
+          limite: int | None = None, saida=print) -> list[dict]:
+    """Chama o modelo e escreve o relatório para conferência, SEM gravar no banco. As respostas
+    ficam em disco: o --executar depois reaproveita e não paga as matérias de novo."""
+    resultados: list[dict] = []
+    for a in atos:
+        if a["n_materias"] or a["analise_completa"] or not (
+                a["content_disponivel"] and (a["texto_completo"] or "").strip()):
+            saida(f"[pulado] ato {a['id']}: já tem matéria, já está analisado ou não tem texto")
+            resultados.append({"ato_id": a["id"], "erro": "fora da fila"})
+            continue
+        escolhido = modelo or escolher_modelo(a["tipo_ato"], a["numero"], a["ano"])
+        try:
+            materias, meta = categorizar(a, a["texto_completo"], chamar, modelo=escolhido,
+                                         uso=uso, limite=limite)
+        except FalhaCategorizacao as e:
+            saida(f"[erro] ato {a['id']}: {e}")
+            resultados.append({"ato_id": a["id"], "erro": str(e)})
+            continue
+        norma = norma_do_ato(a)
+        linhas = [linha_materia(m, i, norma) for i, m in enumerate(materias, 1)]
+        rel = relatorio(a, materias, linhas, meta, escolhido)
+        caminho = escrever_relatorio(a, run_id, rel)
+        saida(f"[relatório] ato {a['id']}: {rel['resumo']}\n  {caminho}")
+        resultados.append({"ato_id": a["id"], "relatorio": str(caminho), **rel["resumo"]})
+    return resultados
+
+
+PERMISSOES = (("rfb_atos.ato", "UPDATE"), ("rfb_atos.ato_content", "UPDATE"),
+              ("rfb_atos.ato_materia", "INSERT"), ("rfb_atos.ato_materia", "UPDATE"),
+              ("rfb_atos.materia_tributo", "INSERT"), ("rfb_atos.materia_dispositivo", "INSERT"),
+              ("rfb_atos.materia_cnae", "INSERT"), ("rfb_atos.ato_mudanca", "INSERT"))
+
+
+def exigir_permissoes(conn) -> None:
+    """Confere, antes de pagar o modelo, se o usuário atual grava tudo o que será gravado
+    (UPDATE no teor é o que o FOR SHARE da conferência de hash exige)."""
+    faltam = [f"{priv} em {tabela}" for tabela, priv in PERMISSOES
+              if not conn.execute("SELECT has_table_privilege(%s, %s)",
+                                  (tabela, priv)).fetchone()[0]]
+    for tabela in ("rfb_atos.ato_materia", "rfb_atos.materia_dispositivo", "rfb_atos.ato_mudanca"):
+        seq = conn.execute("SELECT pg_get_serial_sequence(%s, 'id')", (tabela,)).fetchone()[0]
+        if seq and not conn.execute("SELECT has_sequence_privilege(%s, 'USAGE')",
+                                    (seq,)).fetchone()[0]:
+            faltam.append(f"USAGE na sequência {seq}")
+    if faltam:
+        raise SemPermissao("faltam permissões ao usuário atual: " + "; ".join(faltam))
+
+
+def codigo_saida(resultados: list[dict], *, sinal: bool = True, vetor: bool = True) -> int:
+    """1 se algum ato falhou ou ficou sem o sinal/vetor pedido: agendador e CI não podem ler o
+    lote como sucesso (revisão 4-LLM, Codex)."""
+    for r in resultados:
+        if r.get("erro") or (sinal and r.get("sem_sinal")) or (vetor and r.get("sem_vetor")):
+            return 1
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -868,8 +1059,11 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=20, help="com --pendentes (padrão 20)")
     p.add_argument("--modelo", help=f"força o modelo (padrão: {MODELO_CADEIA} na cadeia de "
                                     f"PIS/COFINS, {MODELO_MASSA} no resto)")
-    p.add_argument("--executar", action="store_true",
-                   help="chama os modelos e grava (padrão: só o plano, sem custo)")
+    modo = p.add_mutually_exclusive_group()
+    modo.add_argument("--gerar", action="store_true",
+                      help="chama o modelo e escreve o relatório para conferir; não grava")
+    modo.add_argument("--executar", action="store_true",
+                      help="grava como rfb_writer (reaproveita as respostas do --gerar)")
     p.add_argument("--sem-sinal", action="store_true")
     p.add_argument("--sem-vetor", action="store_true")
     p.add_argument("--run-id")
@@ -896,19 +1090,35 @@ def main() -> None:
             print(f"{rotulo}: {modelo} | {_mil(e['caracteres'])} caracteres sem HTML | "
                   f"{e['partes']} partes | ~{_mil(e['entrada'])} tokens de entrada, "
                   f"~{_mil(e['saida'])} de saída | ~US$ {e['custo']:.2f}")
-        if not args.executar:
+        if not (args.gerar or args.executar):
             print(f"\ncusto estimado das matérias: ~US$ {custo_total:.2f} (preço de referência; o "
-                  "real sai no fim da execução)\n(plano: nada chamado nem gravado. Use --executar "
-                  "para chamar os modelos e gravar como rfb_writer.)")
+                  "real sai no fim)\n(plano: nada chamado nem gravado. --gerar chama o modelo e "
+                  "escreve o relatório para conferir, sem gravar; --executar grava como "
+                  "rfb_writer, reaproveitando as respostas do --gerar.)")
             return
 
-        exigir_schema(conn)
         uso = Uso()
-        executar_lote(conn, atos, chamador_anthropic(), run_id=run_id, uso=uso,
-                      modelo=args.modelo, sinal=not args.sem_sinal, vetor=not args.sem_vetor)
+        if args.gerar:
+            resultados = gerar(atos, chamador_anthropic(), run_id=run_id, uso=uso,
+                               modelo=args.modelo)
+        else:
+            exigir_schema(conn)
+            try:
+                exigir_permissoes(conn)
+            except SemPermissao as e:
+                sys.exit(f"[erro] {e}")
+            resultados = executar_lote(conn, atos, chamador_anthropic(), run_id=run_id, uso=uso,
+                                       modelo=args.modelo, sinal=not args.sem_sinal,
+                                       vetor=not args.sem_vetor)
         for modelo, d in uso.por_modelo.items():
             print(f"uso {modelo}: {d}")
         print(f"custo das chamadas (preço de referência): ~US$ {uso.custo():.2f}")
+        codigo = codigo_saida(resultados, sinal=not args.sem_sinal and args.executar,
+                              vetor=not args.sem_vetor and args.executar)
+        sem_erro = sum(1 for r in resultados if not r.get("erro"))
+        print(f"\n{sem_erro} de {len(resultados)} atos sem erro"
+              + ("" if codigo == 0 else " — há erro ou pendência de sinal/vetor (saída 1)"))
+        sys.exit(codigo)
 
 
 if __name__ == "__main__":
