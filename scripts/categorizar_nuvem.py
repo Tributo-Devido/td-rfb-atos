@@ -28,7 +28,7 @@ vezes. Toda alteração em linha existente vai para `ato_mudanca` com o run_id (
 Uso:
     python categorizar_nuvem.py --ato 16630             # plano: partes, modelo, custo estimado
     python categorizar_nuvem.py --ato 16630 --gerar     # chama o modelo, relatório; NÃO grava
-    python categorizar_nuvem.py --ato 16630 --executar  # grava (rfb_writer), reusa o --gerar
+    python categorizar_nuvem.py --ato 16630 --executar  # grava o que o --gerar mostrou
     python categorizar_nuvem.py --pendentes --limit 20  # fila: com texto, sem análise, sem matéria
 """
 from __future__ import annotations
@@ -121,6 +121,11 @@ class AtoInapto(RuntimeError):
 
 class SemPermissao(RuntimeError):
     """O usuário do banco não pode gravar o que a categorização grava."""
+
+
+class SemRespostaConferida(FalhaCategorizacao):
+    """O --executar só grava matéria que o --gerar mostrou: sem a resposta em disco, não chama o
+    modelo (revisão 4-LLM, Codex v3)."""
 
 
 # ---------------------------------------------------------------------------
@@ -393,14 +398,20 @@ def _dir_respostas(ato_id: int) -> Path:
 
 
 def chamar_com_disco(chamar, ato_id: int, modelo: str, sistema: list[dict], usuario: str,
-                     max_tokens: int, *, aceitar) -> tuple[Resposta, bool]:
-    """Chama o modelo ou reaproveita a resposta guardada para exatamente o mesmo pedido.
-    Só guarda resposta que `aceitar` aprova (cortada ou ilegível é pedida de novo)."""
+                     max_tokens: int, *, aceitar,
+                     so_disco: bool = False) -> tuple[Resposta, bool]:
+    """Chama o modelo ou reaproveita a resposta guardada para exatamente o mesmo pedido — a chave
+    é o hash de modelo + prompts + trecho + max_tokens. Só guarda resposta que `aceitar` aprova.
+    Com `so_disco` não chama: sem a resposta guardada, levanta SemRespostaConferida."""
     pedido = json.dumps([modelo, sistema, usuario, max_tokens], ensure_ascii=False)
     arquivo = _dir_respostas(ato_id) / f"{hashlib.sha256(pedido.encode()).hexdigest()[:24]}.json"
     if arquivo.exists():
         d = json.loads(arquivo.read_text(encoding="utf-8"))
         return Resposta(d["texto"], d["parada"], d["uso"]), True
+    if so_disco:
+        raise SemRespostaConferida(
+            f"ato {ato_id}: sem resposta conferida para este pedido (o texto, o prompt ou o modelo "
+            "mudou desde o --gerar, ou ele não rodou); rode --gerar e confira o relatório")
     r = chamar(modelo, sistema, usuario, max_tokens)
     if aceitar(r):
         arquivo.parent.mkdir(parents=True, exist_ok=True)
@@ -444,8 +455,10 @@ def validar_saida(d) -> dict:
 
 
 def _materias_legiveis(r: Resposta) -> bool:
+    """Vai para o disco a resposta válida e também a cortada no limite de tokens: o --executar
+    (só disco) precisa saber que aquela parte foi dividida."""
     if r.parada == "max_tokens":
-        return False
+        return True
     try:
         validar_saida(interpretar(r.texto))
     except ValueError:
@@ -454,10 +467,11 @@ def _materias_legiveis(r: Resposta) -> bool:
 
 
 def _categorizar_parte(ato: dict, parte: Parte, total: int, sistema: list[dict], chamar, *,
-                       modelo: str, uso: Uso, profundidade: int = 0) -> list[dict]:
+                       modelo: str, uso: Uso, profundidade: int = 0,
+                       so_disco: bool = False) -> list[dict]:
     usuario = mensagem_usuario(ato, parte, total)
     r, do_disco = chamar_com_disco(chamar, ato["id"], modelo, sistema, usuario, MAX_TOKENS,
-                                   aceitar=_materias_legiveis)
+                                   aceitar=_materias_legiveis, so_disco=so_disco)
     uso.somar(modelo, r.uso, do_disco)
     if r.parada == "max_tokens":
         # muitas matérias para caber na resposta: divide o trecho em dois e pede cada metade
@@ -467,7 +481,7 @@ def _categorizar_parte(ato: dict, parte: Parte, total: int, sistema: list[dict],
         for i, sub in enumerate(particionar(parte.texto, len(parte.texto) // 2 + 1), 1):
             sub = Parte(f"{parte.rotulo}.{i}", sub.texto, sub.caminho or parte.caminho)
             saidas += _categorizar_parte(ato, sub, total, sistema, chamar, modelo=modelo, uso=uso,
-                                         profundidade=profundidade + 1)
+                                         profundidade=profundidade + 1, so_disco=so_disco)
         return saidas
     try:
         saida = validar_saida(interpretar(r.texto))
@@ -507,8 +521,9 @@ def juntar(saidas: list[dict]) -> tuple[list[dict], dict]:
 
 
 def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
-                limite: int | None = None) -> tuple[list[dict], dict]:
-    """Chama o modelo parte a parte. Tudo ou nada: se uma parte falha, levanta."""
+                limite: int | None = None, so_disco: bool = False) -> tuple[list[dict], dict]:
+    """Chama o modelo parte a parte. Tudo ou nada: se uma parte falha, levanta. Com `so_disco`,
+    só usa as respostas guardadas pelo --gerar."""
     limpo = texto_para_llm(texto)
     if not limpo:
         raise FalhaCategorizacao("texto vazio depois de tirar o HTML")
@@ -519,8 +534,10 @@ def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
     saidas: list[dict] = []
     for parte in partes:
         saidas += _categorizar_parte(ato, parte, len(partes), sistema, chamar, modelo=modelo,
-                                     uso=uso)
+                                     uso=uso, so_disco=so_disco)
     materias, meta = juntar(saidas)
+    if not materias:
+        raise FalhaCategorizacao("nenhuma parte devolveu matéria")
     meta["partes"], meta["chamadas"] = len(partes), len(saidas)
     return materias, meta
 
@@ -822,8 +839,9 @@ def carregar_atos(conn, *, ids: list[int] | None = None, pendentes: bool = False
 
 def processar_ato(conn, ato: dict, chamar, *, modelo: str, run_id: str, uso: Uso,
                   sinal: bool = True, vetor: bool = True, embed=None,
-                  limite: int | None = None) -> dict:
-    """Matérias (se o ato ainda não tem), depois sinal e vetor das matérias do ato."""
+                  limite: int | None = None, so_disco: bool = False) -> dict:
+    """Matérias (se o ato ainda não tem), depois sinal e vetor das matérias do ato. Com
+    `so_disco`, as matérias só saem das respostas conferidas no --gerar."""
     agora = ato["n_materias"] == 0
     if agora:
         if not (ato["content_disponivel"] and (ato["texto_completo"] or "").strip()):
@@ -831,7 +849,7 @@ def processar_ato(conn, ato: dict, chamar, *, modelo: str, run_id: str, uso: Uso
         if ato["analise_completa"]:
             raise AtoInapto(f"ato {ato['id']} já está com analise_completa")
         materias, meta = categorizar(ato, ato["texto_completo"], chamar, modelo=modelo, uso=uso,
-                                     limite=limite)
+                                     limite=limite, so_disco=so_disco)
         meta["texto_sha256"] = _sha256(ato["texto_completo"])
         norma = norma_do_ato(ato)
         linhas = [linha_materia(m, i, norma) for i, m in enumerate(materias, 1)]
@@ -853,7 +871,8 @@ def processar_ato(conn, ato: dict, chamar, *, modelo: str, run_id: str, uso: Uso
 
 def executar_lote(conn, atos: list[dict], chamar, *, run_id: str, uso: Uso,
                   modelo: str | None = None, sinal: bool = True, vetor: bool = True,
-                  embed=None, limite: int | None = None, saida=print) -> list[dict]:
+                  embed=None, limite: int | None = None, so_disco: bool = False,
+                  saida=print) -> list[dict]:
     """Um ato por vez; um ato com problema não derruba os outros. As matérias gravadas ficam (a
     transação delas já fechou): rodar `--ato` de novo completa sinal e vetor."""
     resultados: list[dict] = []
@@ -861,7 +880,8 @@ def executar_lote(conn, atos: list[dict], chamar, *, run_id: str, uso: Uso,
         escolhido = modelo or escolher_modelo(a["tipo_ato"], a["numero"], a["ano"])
         try:
             resumo = processar_ato(conn, a, chamar, modelo=escolhido, run_id=run_id, uso=uso,
-                                   sinal=sinal, vetor=vetor, embed=embed, limite=limite)
+                                   sinal=sinal, vetor=vetor, embed=embed, limite=limite,
+                                   so_disco=so_disco)
         except (AtoInapto, FalhaCategorizacao) as e:
             saida(f"[pulado] ato {a['id']}: {e}")
             resultados.append({"ato_id": a["id"], "erro": str(e)})
@@ -1063,7 +1083,7 @@ def main() -> None:
     modo.add_argument("--gerar", action="store_true",
                       help="chama o modelo e escreve o relatório para conferir; não grava")
     modo.add_argument("--executar", action="store_true",
-                      help="grava como rfb_writer (reaproveita as respostas do --gerar)")
+                      help="grava como rfb_writer só o que o --gerar mostrou")
     p.add_argument("--sem-sinal", action="store_true")
     p.add_argument("--sem-vetor", action="store_true")
     p.add_argument("--run-id")
@@ -1073,8 +1093,9 @@ def main() -> None:
 
     with psycopg.connect(_dsn(args.dsn, args.executar), autocommit=True) as conn:
         atos = carregar_atos(conn, ids=args.ato, pendentes=args.pendentes, limit=args.limit)
-        for faltando in sorted(set(args.ato or []) - {a["id"] for a in atos}):
-            print(f"ato {faltando}: não existe")
+        faltando = sorted(set(args.ato or []) - {a["id"] for a in atos})
+        for ato_id in faltando:
+            print(f"ato {ato_id}: não existe")
         custo_total = 0.0
         for a in atos:
             modelo = args.modelo or escolher_modelo(a["tipo_ato"], a["numero"], a["ano"])
@@ -1094,8 +1115,8 @@ def main() -> None:
             print(f"\ncusto estimado das matérias: ~US$ {custo_total:.2f} (preço de referência; o "
                   "real sai no fim)\n(plano: nada chamado nem gravado. --gerar chama o modelo e "
                   "escreve o relatório para conferir, sem gravar; --executar grava como "
-                  "rfb_writer, reaproveitando as respostas do --gerar.)")
-            return
+                  "rfb_writer só o que o --gerar mostrou, sem chamar o modelo de novo.)")
+            sys.exit(1 if faltando else 0)
 
         uso = Uso()
         if args.gerar:
@@ -1109,12 +1130,14 @@ def main() -> None:
                 sys.exit(f"[erro] {e}")
             resultados = executar_lote(conn, atos, chamador_anthropic(), run_id=run_id, uso=uso,
                                        modelo=args.modelo, sinal=not args.sem_sinal,
-                                       vetor=not args.sem_vetor)
+                                       vetor=not args.sem_vetor, so_disco=True)
         for modelo, d in uso.por_modelo.items():
             print(f"uso {modelo}: {d}")
         print(f"custo das chamadas (preço de referência): ~US$ {uso.custo():.2f}")
         codigo = codigo_saida(resultados, sinal=not args.sem_sinal and args.executar,
                               vetor=not args.sem_vetor and args.executar)
+        if faltando:
+            codigo = 1
         sem_erro = sum(1 for r in resultados if not r.get("erro"))
         print(f"\n{sem_erro} de {len(resultados)} atos sem erro"
               + ("" if codigo == 0 else " — há erro ou pendência de sinal/vetor (saída 1)"))

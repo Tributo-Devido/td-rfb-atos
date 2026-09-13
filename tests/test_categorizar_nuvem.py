@@ -461,9 +461,44 @@ def test_gerar_faz_relatorio_sem_gravar_e_executar_reaproveita(conn):
     assert _um(conn, "SELECT count(*) FROM rfb_atos.ato_materia WHERE ato_id = %s", ATO) == (0,)
     assert _um(conn, "SELECT analise_completa FROM rfb_atos.ato WHERE id = %s", ATO) == (False,)
 
-    gravado = cn.executar_lote(conn, cn.carregar_atos(conn, ids=[ATO]), modelo, run_id="e1",
-                               uso=cn.Uso(), embed=_vetores, limite=5000, saida=_mudo)[0]
-    assert len(modelo.mensagens) == n and gravado["materias"] == n   # nenhuma chamada nova
+    sem_api = FalsoModelo()        # o --executar não pode pedir matéria ao modelo
+    gravado = cn.executar_lote(conn, cn.carregar_atos(conn, ids=[ATO]), sem_api, run_id="e1",
+                               uso=cn.Uso(), embed=_vetores, limite=5000, so_disco=True,
+                               saida=_mudo)[0]
+    assert sem_api.mensagens == [] and gravado["materias"] == n
+
+
+@precisa_banco
+def test_executar_sem_resposta_conferida_nao_chama_o_modelo_nem_grava(conn):
+    """Revisão 4-LLM (Codex v3): o --executar só grava o que o --gerar mostrou. Texto mudado depois
+    do relatório = pedido diferente = sem resposta conferida."""
+    cn.gerar(cn.carregar_atos(conn, ids=[ATO]), FalsoModelo(), run_id="g1", uso=cn.Uso(),
+             limite=5000, saida=_mudo)
+    conn.execute("UPDATE rfb_atos.ato_content SET texto_completo = texto_completo || "
+                 "' Mais uma frase.' WHERE ato_id = %s", (ATO,))
+    sem_api = FalsoModelo()
+    resultado = cn.executar_lote(conn, cn.carregar_atos(conn, ids=[ATO]), sem_api, run_id="e2",
+                                 uso=cn.Uso(), embed=_vetores, limite=5000, so_disco=True,
+                                 saida=_mudo)[0]
+    assert "rode --gerar" in resultado["erro"] and sem_api.mensagens == []
+    assert _um(conn, "SELECT count(*) FROM rfb_atos.ato_materia WHERE ato_id = %s", ATO) == (0,)
+    assert _um(conn, "SELECT analise_completa FROM rfb_atos.ato WHERE id = %s", ATO) == (False,)
+
+
+def test_parte_cortada_no_gerar_tambem_serve_ao_executar():
+    texto = _texto_longo(titulos=1, artigos=40, preambulo=False)
+    cn.categorizar(_ato(), texto, FalsoModelo(cortar_acima=18_000), modelo=cn.MODELO_MASSA,
+                   uso=cn.Uso())
+    sem_api = FalsoModelo()
+    materias, meta = cn.categorizar(_ato(), texto, sem_api, modelo=cn.MODELO_MASSA, uso=cn.Uso(),
+                                    so_disco=True)
+    assert sem_api.mensagens == [] and meta["chamadas"] == len(materias) >= 2
+
+
+def test_nenhuma_parte_com_materia_derruba_o_ato():
+    vazio = FalsoModelo(corpo=lambda _n: {"materias": []})
+    with pytest.raises(cn.FalhaCategorizacao, match="nenhuma parte"):
+        cn.categorizar(_ato(), "Art. 1º Curto.", vazio, modelo=cn.MODELO_MASSA, uso=cn.Uso())
 
 
 @precisa_banco

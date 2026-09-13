@@ -241,3 +241,22 @@ para apagar as matérias.
 
 **O que derrubaria.** Relatório com cobertura de artigos baixa, partes sem matéria ou temas
 repetidos com conteúdo equivalente — aí a reconciliação é feita antes do `--executar`.
+
+---
+
+## 2026-09-13 · `--executar` grava só o que o `--gerar` mostrou
+
+**Decisão.** Revisão 4-LLM da versão 3 (Codex): o `--executar` não chama o modelo para as matérias
+— só lê as respostas guardadas pelo `--gerar`. A chave de cada resposta é o hash de modelo + prompts
++ trecho + max_tokens; se o texto, o prompt ou o modelo mudaram depois do relatório, falta a resposta
+e o ato para sem gravar ("rode --gerar"). A resposta cortada no limite de tokens também fica em disco,
+para o `--executar` refazer a mesma divisão. Ato sem matéria nenhuma falha já no `--gerar`; `--ato`
+inexistente sai com código 1. O sinal (uma palavra por matéria, Haiku) continua sendo pedido no
+`--executar`: não entra no relatório.
+
+**Alternativa descartada.** Manifesto separado com os hashes do texto, do modelo e dos prompts
+(sugestão do Codex): a própria chave da resposta já é esse hash; um manifesto repetiria a mesma
+conferência em outro arquivo.
+
+**O que derrubaria.** Precisar gravar em lote sem conferência (massa de atos no Haiku) — aí um
+`--sem-conferencia` explícito, decidido pelo dono.
