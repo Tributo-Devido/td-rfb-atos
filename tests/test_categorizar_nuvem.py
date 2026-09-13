@@ -57,6 +57,7 @@ class FalsoModelo:
     def __init__(self, *, falhar_na: int | None = None, cortar_acima: int | None = None):
         self.falhar_na, self.cortar_acima = falhar_na, cortar_acima
         self.mensagens: list[str] = []
+        self.sistemas: list[list[dict]] = []
         self.sinais = 0
 
     def __call__(self, modelo, sistema, usuario, max_tokens):
@@ -64,6 +65,7 @@ class FalsoModelo:
             self.sinais += 1
             return cn.Resposta("VEDA", "end_turn", {"entrada": 50, "saida": 1})
         self.mensagens.append(usuario)
+        self.sistemas.append(sistema)
         n = len(self.mensagens)
         if n == self.falhar_na:
             return cn.Resposta("desculpe, não consigo", "end_turn", {})
@@ -133,6 +135,28 @@ def test_palavra_no_inicio_de_paragrafo_nao_vira_cabecalho():
     assert cn._CABECALHO.match("Livro Registro de Inventário deve ser escriturado") is None
     assert cn._CABECALHO.match("Subseção IV\nDas Agências") is not None
     assert cn._CABECALHO.match("ANEXO ÚNICO") is not None
+
+
+def test_sumario_pega_o_nome_no_bloco_seguinte_e_o_primeiro_artigo():
+    texto = ("LIVRO I\n\nDISPOSIÇÕES GERAIS\n\nTÍTULO I\n\nDO FATO GERADOR\n\nArt. 1º Texto."
+             "\n\nArt. 2º Mais.\n\nTÍTULO II<br>DA BASE\n\nArt. 3º-A Outro.\n\nANEXO I\n\nTabela")
+    assert cn.sumario(cn.texto_para_llm(texto)).split("\n") == [
+        "LIVRO I (DISPOSIÇÕES GERAIS) — art. 1º",
+        "  TÍTULO I (DO FATO GERADOR) — art. 1º",
+        "  TÍTULO II (DA BASE) — art. 3º-A",
+        "ANEXO I (Tabela)",
+    ]
+
+
+def test_cada_parte_leva_o_sumario_do_ato_inteiro():
+    modelo = FalsoModelo()
+    cn.categorizar(_ato(), _texto_longo(), modelo, modelo=cn.MODELO_CADEIA, uso=cn.Uso(),
+                   limite=5000)
+    ultimos = {s[-1]["text"] for s in modelo.sistemas}
+    assert len(ultimos) == 1 and "TÍTULO 6 (DO TEMA 6) — art. 31" in ultimos.pop()
+    curto = FalsoModelo()
+    cn.categorizar(_ato(), "Art. 1º Curto.", curto, modelo=cn.MODELO_MASSA, uso=cn.Uso())
+    assert len(curto.sistemas[0]) == 3      # ato de uma parte só não precisa de sumário
 
 
 @pytest.mark.parametrize(("tipo", "numero", "ano", "esperado"), [

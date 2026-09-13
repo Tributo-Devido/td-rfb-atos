@@ -104,6 +104,7 @@ _CABECALHO = re.compile(
     r"([IVXLCDM]+|\d+|[ÚU]NIC[OA])\b", re.IGNORECASE)
 _NIVEL = {"LIVRO": 0, "ANEXO": 0, "TITULO": 1, "CAPITULO": 2, "SECAO": 3, "SUBSECAO": 4}
 _ARTIGO = re.compile(r"^Art\.\s*\d", re.IGNORECASE)
+_ARTIGO_NUM = re.compile(r"^Art\.\s*(\d+[\w-]*)", re.IGNORECASE)
 _TAG_QUEBRA = re.compile(r"<\s*br\s*/?\s*>|</\s*p\s*>", re.IGNORECASE)
 _TAG = re.compile(r"<[^>]+>")
 
@@ -144,9 +145,17 @@ def _tam(blocos: list[str]) -> int:
     return sum(len(b) for b in blocos) + 2 * max(0, len(blocos) - 1)
 
 
-def _rotulo_cabecalho(bloco: str) -> str:
-    linhas = [x.strip() for x in bloco.split("\n") if x.strip()]
-    return f"{linhas[0][:60]} ({linhas[1][:60]})" if len(linhas) > 1 else linhas[0][:60]
+def _rotulo_cabecalho(blocos: list[str], i: int) -> str:
+    """Rótulo do cabeçalho `blocos[i]` com o nome dele, que o portal às vezes põe no mesmo
+    segmento ("TÍTULO I<br>DO FATO GERADOR") e às vezes no seguinte ("Seção I" / "Do Crédito")."""
+    linhas = [x.strip() for x in blocos[i].split("\n") if x.strip()]
+    nome = linhas[1] if len(linhas) > 1 else ""
+    if not nome and i + 1 < len(blocos):
+        seguinte = blocos[i + 1].strip()
+        if (seguinte and len(seguinte) <= 200 and "\n" not in seguinte
+                and not _ARTIGO.match(seguinte) and not _CABECALHO.match(seguinte)):
+            nome = seguinte
+    return f"{linhas[0][:60]} ({nome[:60]})" if nome else linhas[0][:60]
 
 
 def _unidades(blocos: list[str]) -> list[tuple[list[str], str]]:
@@ -155,14 +164,14 @@ def _unidades(blocos: list[str]) -> list[tuple[list[str], str]]:
     unidades: list[tuple[list[str], str]] = []
     atual: list[str] = []
     caminho = ""
-    for bloco in blocos:
+    for i, bloco in enumerate(blocos):
         m = _CABECALHO.match(bloco)
         if m:
             if atual:
                 unidades.append((atual, caminho))
             nivel = _NIVEL[_sem_acento(m.group(1)).upper()]
             pilha = {k: v for k, v in pilha.items() if k < nivel}
-            pilha[nivel] = _rotulo_cabecalho(bloco)
+            pilha[nivel] = _rotulo_cabecalho(blocos, i)
             atual, caminho = [], " > ".join(pilha[k] for k in sorted(pilha))
         atual.append(bloco)
     if atual:
@@ -242,6 +251,35 @@ def particionar(texto: str, limite: int | None = None) -> list[Parte]:
     if atual:
         partes.append(Parte(str(len(partes) + 1), "\n\n".join(atual), caminho_atual))
     return partes
+
+
+def sumario(texto: str) -> str:
+    """Cabeçalhos do ato, recuados por nível, com o primeiro artigo de cada um."""
+    linhas: list[list[str]] = []
+    sem_artigo: list[int] = []   # cabeçalhos ainda à espera do primeiro artigo
+    blocos = texto.split("\n\n")
+    for i, bloco in enumerate(blocos):
+        m = _CABECALHO.match(bloco)
+        if m:
+            nivel = _NIVEL[_sem_acento(m.group(1)).upper()]
+            linhas.append(["  " * nivel + _rotulo_cabecalho(blocos, i), ""])
+            sem_artigo.append(len(linhas) - 1)
+        elif sem_artigo and (a := _ARTIGO_NUM.match(bloco)):
+            for i in sem_artigo:
+                linhas[i][1] = f" — art. {a.group(1)}"
+            sem_artigo = []
+    return "\n".join(rotulo + artigo for rotulo, artigo in linhas)
+
+
+def bloco_sumario(texto: str) -> dict:
+    """Sumário do ato inteiro para cada parte saber onde está no todo (revisão 4-LLM de 13/09:
+    sem ele, uma remissão "de que trata o art. 171" fica no vácuo). Um por ato, em cache: as
+    partes seguintes pagam 10% dele."""
+    return {"type": "text", "cache_control": {"type": "ephemeral"},
+            "text": "<sumario_do_ato>\nCabeçalhos do ato inteiro, com o primeiro artigo de cada "
+                    "um. Cada chamada recebe só uma parte do texto: use o sumário para situar o "
+                    "trecho. Quando o trecho remeter a artigo de outra parte, cite o artigo sem "
+                    f"presumir o conteúdo dele.\n{sumario(texto)}\n</sumario_do_ato>"}
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +470,8 @@ def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
         raise FalhaCategorizacao("texto vazio depois de tirar o HTML")
     partes = particionar(limpo, limite)
     sistema = blocos_sistema(ato["tipo_ato"])
+    if len(partes) > 1:
+        sistema.append(bloco_sumario(limpo))
     saidas: list[dict] = []
     for parte in partes:
         saidas += _categorizar_parte(ato, parte, len(partes), sistema, chamar, modelo=modelo,
@@ -695,7 +735,8 @@ def estimar(ato: dict, modelo: str) -> dict:
     """Tokens e custo aproximados das matérias (sinal e vetor custam centavos)."""
     limpo = texto_para_llm(ato.get("texto_completo"))
     partes = len(particionar(limpo)) if limpo else 0
-    sistema = sum(len(b["text"]) for b in blocos_sistema(ato["tipo_ato"])) / CARACTERES_POR_TOKEN
+    blocos = blocos_sistema(ato["tipo_ato"]) + ([bloco_sumario(limpo)] if partes > 1 else [])
+    sistema = sum(len(b["text"]) for b in blocos) / CARACTERES_POR_TOKEN
     entrada = len(limpo) / CARACTERES_POR_TOKEN + 300 * partes
     saida = SAIDA_POR_PARTE * partes
     p_in, p_out = PRECO_REFERENCIA.get(modelo, (0.0, 0.0))
