@@ -89,7 +89,10 @@ robocopy C:\td-skills\td-rfb-atos C:\td-rfb-atos /E /XC /XN /XO `
 
 - [x] Remover `td-rfb-atos/` do `tdax-3.0` — feito no `main` (commit `06da0fea`, 05/09/2026)
 - [x] Ligar o CI: `.github/workflows/ci.yml` roda lint + 46 testes contra Postgres
-- [ ] Remover a cópia em `C:\td-skills\td-rfb-atos` depois do push deste PR
+- [x] Remover a cópia em `C:\td-skills\td-rfb-atos` — removida em 12/09/2026, depois de
+      conferir por hash que todo arquivo tinha cópia idêntica no repo ou em
+      `C:\td-rfb-atos-dados\_legado-td-skills\`. Os 9 arquivos que eram rastreados no git
+      do td-skills (branch `feat/rfb-atos-embed`) aparecem lá como apagados, sem commit
 - [ ] Decidir o destino das migrations `004`/`005`/`006` da nuvem (item 2)
 - [ ] `reembed_cloud.py` e `validate_cloud_parity.py` importam `lib.embed_openai`, que mora
       em `td-creditos/scripts/lib/` — trazer para cá ou empacotar

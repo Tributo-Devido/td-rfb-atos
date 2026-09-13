@@ -59,9 +59,10 @@ não rodam sozinhos a partir deste repositório.
 | estudos (`outputs/wip/<tema>/v1`, `v2`) | `C:\td-rfb-atos\outputs\` — dentro do repo, ignorado pelo git |
 | `scripts/.env` (chaves e DSN) | `C:\td-rfb-atos\scripts\.env` — ignorado pelo git |
 
-Os estudos ficam em `outputs/`, e não na pasta de dados, porque o td-creditos, o
-td-mapeamento-fiscal e o `/td:mapeamento:aplicar` os procuram em
-`td-rfb-atos/outputs/wip/<tema>/`. Se devem ser versionados é decisão em aberto — ver
+Os estudos ficam em `outputs/`, e não na pasta de dados, porque as referências do
+td-creditos e do td-mapeamento-fiscal os procuram em `td-rfb-atos/outputs/wip/<tema>/`.
+(O `/td:mapeamento:aplicar`, que também os lia, foi descontinuado em 12/09/2026 — as
+análises de PIS/COFINS passaram para o `/td-analise-piscofins:executar`.) Se devem ser versionados é decisão em aberto — ver
 [`docs/DECISOES.md`](docs/DECISOES.md).
 
 ## Revisão de cobertura — o problema central
