@@ -77,6 +77,10 @@ TIPOS_SC = {"SOLUCAO_CONSULTA", "SOLUCAO_DIVERGENCIA", "SOLUCAO_CONSULTA_INTERNA
 MODELO_CADEIA = "claude-sonnet-5"
 MODELO_MASSA = "claude-haiku-4-5-20251001"
 MODELO_SINAL = "claude-haiku-4-5-20251001"
+# Só o Haiku 4.5 recebe temperature=0: o Sonnet 5 recusa valor diferente do padrão (HTTP 400; guia
+# de migração do Sonnet 5, apontado na revisão 4-LLM, Codex v4). O td-analise-piscofins já chama o
+# claude-sonnet-5 sem o parâmetro (scripts/carf-categorizacao/prod_runner.py).
+MODELOS_COM_TEMPERATURA = {MODELO_MASSA}
 # INs centrais de PIS/COFINS (docs/DECISOES.md, 13/09/2026): (número só com dígitos, ano).
 CADEIA_PISCOFINS = {("247", 2002), ("457", 2004), ("660", 2006), ("1717", 2017),
                     ("1911", 2019), ("2121", 2022)}
@@ -347,17 +351,27 @@ class Resposta:
     uso: dict              # entrada, saida, cache_criado, cache_lido (tokens)
 
 
-def chamador_anthropic():
-    """chamar(modelo, sistema, usuario, max_tokens) -> Resposta, com a chave de credenciais."""
-    from credenciais import resolver
-    chave = resolver("anthropic")  # antes do import: falta de chave dá erro claro mesmo sem SDK
-    from anthropic import Anthropic
-    cliente = Anthropic(api_key=chave, max_retries=5)
+def argumentos_da_chamada(modelo: str, sistema: list[dict], usuario: str,
+                          max_tokens: int) -> dict:
+    args = {"model": modelo, "max_tokens": max_tokens, "system": sistema,
+            "messages": [{"role": "user", "content": usuario}]}
+    if modelo in MODELOS_COM_TEMPERATURA:
+        args["temperature"] = 0
+    return args
+
+
+def chamador_anthropic(cliente=None):
+    """chamar(modelo, sistema, usuario, max_tokens) -> Resposta. Sem `cliente`, cria o da
+    Anthropic com a chave de credenciais (o `cliente` injetado é para teste)."""
+    if cliente is None:
+        from credenciais import resolver
+        chave = resolver("anthropic")  # antes do import: falta de chave dá erro claro sem o SDK
+        from anthropic import Anthropic
+        cliente = Anthropic(api_key=chave, max_retries=5)
 
     def chamar(modelo: str, sistema: list[dict], usuario: str, max_tokens: int) -> Resposta:
-        with cliente.messages.stream(model=modelo, max_tokens=max_tokens, temperature=0,
-                                     system=sistema,
-                                     messages=[{"role": "user", "content": usuario}]) as fluxo:
+        with cliente.messages.stream(**argumentos_da_chamada(modelo, sistema, usuario,
+                                                             max_tokens)) as fluxo:
             msg = fluxo.get_final_message()
         u = msg.usage
         return Resposta(
@@ -1115,7 +1129,8 @@ def main() -> None:
             print(f"\ncusto estimado das matérias: ~US$ {custo_total:.2f} (preço de referência; o "
                   "real sai no fim)\n(plano: nada chamado nem gravado. --gerar chama o modelo e "
                   "escreve o relatório para conferir, sem gravar; --executar grava como "
-                  "rfb_writer só o que o --gerar mostrou, sem chamar o modelo de novo.)")
+                  "rfb_writer só o que o --gerar mostrou, sem pedir as matérias de novo "
+                  "(só o sinal, uma palavra por matéria, é pedido no --executar).)")
             sys.exit(1 if faltando else 0)
 
         uso = Uso()

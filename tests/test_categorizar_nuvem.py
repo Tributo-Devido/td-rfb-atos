@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -310,6 +311,38 @@ def test_codigo_de_saida_nao_deixa_lote_com_falha_parecer_sucesso():
     assert cn.codigo_saida([ok, {"ato_id": 2, "erro": "x"}]) == 1
     assert cn.codigo_saida([{**ok, "sem_vetor": 2}]) == 1
     assert cn.codigo_saida([{**ok, "sem_vetor": 2}], vetor=False) == 0
+
+
+def test_sonnet_5_vai_sem_temperature_e_haiku_com_zero():
+    """Revisão 4-LLM (Codex v4): o Sonnet 5 recusa temperature diferente do padrão (HTTP 400)."""
+    pedidos: list[dict] = []
+
+    class Fluxo:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def get_final_message(self):
+            uso = SimpleNamespace(input_tokens=10, output_tokens=2,
+                                  cache_creation_input_tokens=None, cache_read_input_tokens=5)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="{}")],
+                                   stop_reason="end_turn", usage=uso)
+
+    class Mensagens:
+        def stream(self, **kwargs):
+            pedidos.append(kwargs)
+            return Fluxo()
+
+    chamar = cn.chamador_anthropic(SimpleNamespace(messages=Mensagens()))
+    r = chamar(cn.MODELO_CADEIA, [{"type": "text", "text": "s"}], "u", 100)
+    chamar(cn.MODELO_MASSA, [], "u", 20)
+    assert "temperature" not in pedidos[0] and pedidos[1]["temperature"] == 0
+    assert pedidos[0]["model"] == "claude-sonnet-5"
+    assert pedidos[0]["messages"] == [{"role": "user", "content": "u"}]
+    assert r == cn.Resposta("{}", "end_turn",
+                            {"entrada": 10, "saida": 2, "cache_criado": 0, "cache_lido": 5})
 
 
 def test_plano_estima_partes_e_custo():
