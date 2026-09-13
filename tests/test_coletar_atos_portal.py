@@ -143,15 +143,19 @@ def test_arestas_na_convencao_origem_age_sobre_destino():
     assert passiva["data_relacao"] == date(2019, 10, 15)      # publicação deste ato
 
 
-def test_fim_de_vigencia_prefere_a_data_do_portal_e_registra_a_origem():
-    rel = {"impactosPoloAtivo": [_imp(1, "REV", efeito="01/02/2020")]}
-    assert col.fim_vigencia(rel, {})[0] == date(2020, 2, 1)
-    assert col.fim_vigencia(rel, {})[1]["origem"] == "data_efeito_portal"
+def test_fim_de_vigencia_so_com_a_data_de_efeito_do_portal():
+    """Revisão 4-LLM (Gemini, Grok): sem a data de efeito, o fim fica vazio — fechar cedo demais
+    esconderia norma aplicável; a estimativa fica só na auditoria."""
+    rel = {"impactosPoloAtivo": [_imp(1, "REV", efeito="01/02/2020"),
+                                 _imp(2, "REV", efeito="01/03/2019")]}
+    data, auditoria = col.fim_vigencia(rel, {})
+    assert data == date(2019, 3, 1) and auditoria["origem"] == "data_efeito_portal"
+    assert auditoria["revogador_id_portal"] == 2
     sem_efeito = {"impactosPoloAtivo": [_imp(127905, "REV", pub="20/12/2022")]}
-    data, origem = col.fim_vigencia(sem_efeito, {127905: date(2023, 1, 1)})
-    assert data == date(2023, 1, 1) and origem["origem"] == "inicio_vigencia_do_revogador"
-    data, origem = col.fim_vigencia(sem_efeito, {})
-    assert data == date(2022, 12, 20) and origem["origem"] == "publicacao_do_revogador"
+    data, auditoria = col.fim_vigencia(sem_efeito, {127905: date(2023, 1, 1)})
+    assert data is None and auditoria["estimativa"] == "2023-01-01"
+    assert auditoria["origem_estimativa"] == "inicio_vigencia_do_revogador"
+    assert col.fim_vigencia(sem_efeito, {})[1]["origem_estimativa"] == "publicacao_do_revogador"
 
 
 def test_fim_de_vigencia_vale_a_revogacao_mais_antiga_e_ignora_suspensao_e_parcial():
@@ -159,9 +163,19 @@ def test_fim_de_vigencia_vale_a_revogacao_mais_antiga_e_ignora_suspensao_e_parci
         _imp(1, "REV", pub="20/12/2022"), _imp(2, "REV", pub="15/10/2019"),
         _imp(3, "SUS", pub="01/01/2010"), _imp(4, "ALT", pub="01/01/2011"),
         _imp(5, "REV", pub="01/01/2012", hint="Revoga parcialmente")]}
-    data, origem = col.fim_vigencia(rel, {})
-    assert data == date(2019, 10, 15) and origem["revogador_id_portal"] == 2
+    data, auditoria = col.fim_vigencia(rel, {})
+    assert data is None and auditoria["estimativa"] == "2019-10-15"
+    assert auditoria["revogador_id_portal"] == 2
     assert col.fim_vigencia({"impactosPoloAtivo": [_imp(3, "SUS")]}, {}) == (None, None)
+
+
+def test_suspensao_e_alteracao_nao_fecham_e_a_sigla_fica_na_observacao():
+    """Revisão 4-LLM (Grok): SUS tem a mesma cor da revogação no portal (corSimbolo 3) e entra como
+    `interrompe`, como na base; a sigla na observação separa as duas; nenhuma fecha o ato."""
+    (a,) = col.arestas_do_portal(1, None, {"impactosPoloAtivo": [_imp(9, "SUS")]})
+    assert a["tipo_relacao"] == "interrompe" and a["observacao"].startswith("SUS:")
+    so_sus_e_alt = {"impactosPoloAtivo": [_imp(9, "SUS", efeito="01/01/2020"), _imp(4, "ALT")]}
+    assert col.fim_vigencia(so_sus_e_alt, {}) == (None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -224,11 +238,15 @@ def test_ato_nao_vigente_entra_com_texto_fim_e_a_aresta_do_revogador(conn):
                        run_id="c1", saida=_mudo)
     ato = _id(conn, 104314)
     assert r["ato_id"] == ato and r["status_vigencia"] == "nao_vigente"
-    assert _um(conn, "SELECT identificador, emissor, status_vigencia, data_vigencia_fim, "
-                     "content_disponivel, analise_completa, situacao_portal->'fim_vigencia'->>"
-                     "'origem' FROM rfb_atos.ato WHERE id = %s", ato) == (
-        "INSTRUCAO_NORMATIVA 1911/2019", "RFB", "nao_vigente", date(2022, 12, 20), True, False,
-        "inicio_vigencia_do_revogador")
+    # sem data de efeito no portal: fim vazio (o consumidor carimba "data de fim desconhecida")
+    assert _um(conn, "SELECT identificador, emissor, status_vigencia, data_vigencia_inicio, "
+                     "data_vigencia_fim, content_disponivel, analise_completa, "
+                     "situacao_portal->'fim_vigencia'->>'estimativa' FROM rfb_atos.ato "
+                     "WHERE id = %s", ato) == (
+        "INSTRUCAO_NORMATIVA 1911/2019", "RFB", "nao_vigente", date(2019, 10, 15), None, True,
+        False, "2022-12-20")
+    assert _um(conn, "SELECT destino_id_portal FROM rfb_atos.ato_relacao WHERE "
+                     "ato_origem_id = %s AND ato_destino_id = %s", REVOGADOR, ato) == (104314,)
     assert _um(conn, "SELECT tipo_relacao, fonte, observacao, parcial, data_relacao FROM "
                      "rfb_atos.ato_relacao WHERE ato_origem_id = %s AND ato_destino_id = %s",
                REVOGADOR, ato) == ("interrompe", col.FONTE, "REV: Revoga", False,
@@ -263,9 +281,9 @@ def test_ato_que_chega_depois_liga_a_aresta_pendente_sem_duplicar(conn):
                      "AND destino_id_portal = 15123") == (0,)
     assert _um(conn, "SELECT tipo_relacao FROM rfb_atos.ato_relacao WHERE ato_origem_id = %s "
                      "AND ato_destino_id = %s", retif, in247) == ("retifica",)
-    # a 247 é revogada pela 1.911, que agora está na base: fim = início de vigência dela
-    assert _um(conn, "SELECT data_vigencia_fim FROM rfb_atos.ato WHERE id = %s", in247) == (
-        date(2019, 10, 15),)
+    # a 247 é revogada pela 1.911 (portal sem data de efeito): fim vazio, estimativa na auditoria
+    assert _um(conn, "SELECT data_vigencia_fim, situacao_portal->'fim_vigencia'->>'estimativa' "
+                     "FROM rfb_atos.ato WHERE id = %s", in247) == (None, "2019-10-15")
 
 
 @precisa_banco
@@ -301,3 +319,28 @@ def test_numero_que_o_portal_nao_lista_vira_erro_sem_gravar(conn):
     (r,) = col.coletar(conn, ("INSTRUCAO_NORMATIVA", "1", 2019), PortalFalso(), aplicar=True,
                        run_id="x", saida=_mudo)
     assert r["erro"] == "ausente no portal"
+
+
+@precisa_banco
+def test_aresta_pendente_de_outro_ato_e_ligada_quando_o_destino_chega(conn):
+    """Revisão 4-LLM (Grok): a aresta externa não pode ficar ao lado de uma interna igual. Com o ato
+    recém-criado não há interna para ele; a pendente é ligada e nada fica para trás."""
+    conn.execute("INSERT INTO rfb_atos.ato_relacao (ato_origem_id, destino_id_portal, "
+                 "destino_externo, tipo_relacao, fonte) VALUES (%s, 104314, 'IN RFB nº 1911', "
+                 "'altera', %s)", (CONFIRMA_LLM, col.FONTE))
+    (r,) = col.coletar(conn, ("INSTRUCAO_NORMATIVA", "1911", 2019), PortalFalso(), aplicar=True,
+                       run_id="c1", saida=_mudo)
+    assert r["ligadas"] == 1 and r["pendentes_nao_ligadas"] == 0
+    assert _um(conn, "SELECT ato_destino_id FROM rfb_atos.ato_relacao WHERE ato_origem_id = %s "
+                     "AND tipo_relacao = 'altera'", CONFIRMA_LLM) == (r["ato_id"],)
+
+
+@precisa_banco
+def test_ato_ja_na_base_com_outra_grafia_de_orgao_nao_e_duplicado(conn):
+    """Revisão 4-LLM (Grok): o legado tem id_portal vazio e o órgão grafado de outro jeito."""
+    conn.execute("INSERT INTO rfb_atos.ato (tipo_ato, numero, ano, emissor, data_publicacao) "
+                 "VALUES ('INSTRUCAO_NORMATIVA', '1911', 2019, 'SRF', '2019-10-15')")
+    (r,) = col.coletar(conn, ("INSTRUCAO_NORMATIVA", "1911", 2019), PortalFalso(), aplicar=True,
+                       run_id="c1", saida=_mudo)
+    assert r["ja_existia"]
+    assert _um(conn, "SELECT count(*) FROM rfb_atos.ato WHERE numero = '1911'") == (1,)

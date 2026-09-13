@@ -17,10 +17,11 @@ Por ato:
      aresta cuja ORIGEM está fora da base não cabe em ato_relacao (origem é obrigatória) e fica
      registrada em `situacao_portal.relacoes_sem_origem`. Aresta que já existe com fonte do modelo
      (llm-batch) passa a fonte do portal, com antes/depois em ato_mudanca;
-  5. ato não vigente: `data_vigencia_fim` = data de efeito da revogação (REV) publicada pelo portal;
-     quando o portal não publica (o comum), o início de vigência do ato revogador; na falta dele,
-     a publicação do revogador. A origem vai para `situacao_portal.fim_vigencia`. Várias revogações:
-     vale a mais antiga (a primeira vez que o ato deixou de valer). Suspensão (SUS) não fecha o ato.
+  5. ato não vigente: `data_vigencia_fim` só com a data de efeito da revogação (REV) publicada pelo
+     portal (a mais antiga, se houver várias). Sem ela — o comum —, o fim fica vazio (o consumidor
+     carimba "data de fim desconhecida" e não exclui) e a estimativa (início de vigência do
+     revogador, ou a publicação dele) vai só para `situacao_portal.fim_vigencia`. Suspensão (SUS) e
+     revogação parcial não fecham o ato.
 
 Padrão: só o plano (lê como ratio_leitura). `--aplicar` grava como rfb_writer, um ato
 por transação, com antes/depois em ato_mudanca. Exige as migrations 010 e 011.
@@ -202,25 +203,43 @@ def arestas_do_portal(id_portal: int, publicacao: date | None, relacional: dict)
 
 
 def fim_vigencia(relacional: dict, inicio_do_revogador: dict[int, date | None]) -> tuple:
-    """(data_vigencia_fim, origem) de ato não vigente, pelas revogações totais (REV) do portal."""
-    candidatos = []
+    """(data_vigencia_fim, auditoria) de ato não vigente, pelas revogações totais (REV) do portal.
+
+    Só a data de efeito publicada pelo portal vira `data_vigencia_fim`. Sem ela o fim fica vazio e a
+    melhor estimativa (início de vigência do revogador, ou a publicação dele) vai só para a
+    auditoria: fechar cedo demais esconderia norma ainda aplicável — revogação com efeito diferido,
+    por exemplo (revisão 4-LLM de 13/09/2026, Gemini e Grok)."""
+    efeitos, estimativas = [], []
     for imp in relacional.get("impactosPoloAtivo") or []:
         if imp.get("sigla") != "REV" or "parcial" in (imp.get("hint") or "").lower():
             continue
-        revogador = imp.get("idAto")
-        for data, origem in ((vp.data_dmy(imp.get("dataVigenciaPrimeiraAnotacao")),
-                              "data_efeito_portal"),
-                             (inicio_do_revogador.get(revogador), "inicio_vigencia_do_revogador"),
-                             (vp.data_dmy(imp.get("dataPublicacaoDMY")),
-                              "publicacao_do_revogador")):
-            if data:
-                candidatos.append((data, origem, revogador, imp.get("epigrafeBase")))
-                break
-    if not candidatos:
-        return None, None
-    data, origem, revogador, rotulo = min(candidatos, key=lambda c: c[0])
-    return data, {"data": data.isoformat(), "origem": origem, "revogador_id_portal": revogador,
-                  "revogador": rotulo}
+        revogador = {"revogador_id_portal": imp.get("idAto"), "revogador": imp.get("epigrafeBase")}
+        efeito = vp.data_dmy(imp.get("dataVigenciaPrimeiraAnotacao"))
+        if efeito:
+            efeitos.append((efeito, revogador))
+            continue
+        inicio = inicio_do_revogador.get(imp.get("idAto"))
+        estimativa = inicio or vp.data_dmy(imp.get("dataPublicacaoDMY"))
+        if estimativa:
+            origem = "inicio_vigencia_do_revogador" if inicio else "publicacao_do_revogador"
+            estimativas.append((estimativa, {**revogador, "origem_estimativa": origem}))
+    if efeitos:
+        data, revogador = min(efeitos, key=lambda c: c[0])
+        return data, {"data": data.isoformat(), "origem": "data_efeito_portal", **revogador}
+    if estimativas:
+        data, info = min(estimativas, key=lambda c: c[0])
+        return None, {"data": None, "estimativa": data.isoformat(), **info,
+                      "motivo": "o portal não publica a data de efeito desta revogação"}
+    return None, None
+
+
+def _fim_legivel(fim: date | None, auditoria: dict | None) -> str:
+    if fim:
+        return f"{fim} (data de efeito do portal)"
+    if auditoria:
+        return (f"vazio — estimativa {auditoria['estimativa']} "
+                f"({auditoria['origem_estimativa']}), só na auditoria")
+    return "vazio"
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +343,10 @@ def gravar_ato(conn, linha: dict, vigente: dict, original: dict | None, relacion
         resumo = cap.aplicar(conn, ato_id, vigente, original, run_id=run_id,
                              origem_vigente=origem, permitir_anexo_pdf=True)
         ligadas = ligar_pendentes(conn, ato_id, linha["id_portal"], run_id)
+        # aresta externa que não pôde ser ligada (já havia a interna): fica à vista, não some
+        restantes = conn.execute(
+            "SELECT count(*) FROM rfb_atos.ato_relacao WHERE destino_id_portal = %s "
+            "AND ato_destino_id IS NULL", (linha["id_portal"],)).fetchone()[0]
 
         contagem: dict[str, int] = {}
         sem_origem = []
@@ -354,6 +377,7 @@ def gravar_ato(conn, linha: dict, vigente: dict, original: dict | None, relacion
             conn.execute("UPDATE rfb_atos.ato SET situacao_portal = COALESCE(situacao_portal, "
                          "'{}'::jsonb) || %s WHERE id = %s", (Jsonb(extra), ato_id))
     return {**resumo, "ato_id": ato_id, "arestas": contagem, "ligadas": ligadas,
+            "pendentes_nao_ligadas": restantes,
             "sem_origem": len(sem_origem), "data_vigencia_fim": fim and fim.isoformat()}
 
 
@@ -361,12 +385,12 @@ def ja_na_base(conn, linha: dict) -> int | None:
     por_portal = _id_por_portal(conn, linha["id_portal"])
     if por_portal:
         return por_portal
-    # a chave natural da base inclui a data: o ato e a retificação dele têm o mesmo número e ano
+    # chave natural da base, sem o emissor (a grafia do órgão varia no legado); a data separa o ato
+    # da retificação dele, que tem o mesmo número e ano
     achado = conn.execute(
         "SELECT id FROM rfb_atos.ato WHERE tipo_ato = %s "
-        "AND regexp_replace(numero, '\\D', '', 'g') = %s AND emissor = %s AND data_publicacao = %s",
-        (linha["tipo_ato"], linha["numero"], linha["emissor"],
-         linha["data_publicacao"])).fetchone()
+        "AND regexp_replace(numero, '\\D', '', 'g') = %s AND data_publicacao = %s",
+        (linha["tipo_ato"], linha["numero"], linha["data_publicacao"])).fetchone()
     return achado[0] if achado else None
 
 
@@ -407,7 +431,7 @@ def coletar(conn, alvo: tuple[str, str, int], portal, *, aplicar: bool, run_id: 
               f"{linha['data_publicacao']} | {vp.status_vigencia(vigente)} | {len(texto):,} "
               f"caracteres | anexo PDF: {vp.corpo_em_pdf(vigente)} | "
               f"{len(arestas_do_portal(linha['id_portal'], None, relacional))} relações | fim: "
-              f"{fim} ({(origem_fim or {}).get('origem')})")
+              f"{_fim_legivel(fim, origem_fim)}")
         if not aplicar:
             resultados.append({"alvo": rotulo, "plano": True, "caracteres": len(texto)})
             continue

@@ -298,3 +298,31 @@ plano v2.
 **O que derrubaria.** Um ato revogado com cláusula de efeito diferida (revogação que só vale depois
 da vigência do revogador) — a data gravada seria cedo demais. Conferir por amostra quando a recoleta
 em massa rodar; se aparecer, ler a cláusula no texto do revogador.
+
+---
+
+## 2026-09-13 · Fim de vigência só com a data de efeito do portal (substitui a regra da entrada acima)
+
+**Decisão.** *Supersede* a regra de `data_vigencia_fim` da entrada anterior. O coletor grava o fim
+**só** quando o portal publica a data de efeito da revogação (`dataVigenciaPrimeiraAnotacao`; nos 14
+atos, só a IN 1.717/2017 tem). Sem ela, o fim fica vazio e a estimativa (início de vigência do
+revogador, ou a publicação dele) vai só para `situacao_portal.fim_vigencia.estimativa`, para
+auditoria e leitura humana.
+
+**Por quê.** Revisão 4-LLM (Gemini e Grok, 13/09): o custo do erro é assimétrico. Fechar cedo demais
+(revogação com efeito diferido, "produz efeitos a partir de 1º de janeiro") tira da busca uma norma
+que ainda rege os fatos daquele período; deixar vazio só faz o td-analise-piscofins carimbar "NÃO
+VIGENTE (data de fim desconhecida)" sem excluir — o erro seguro. O próprio teste de falsificação da
+entrada anterior era esse caso.
+
+**Alternativas descartadas.** Início de vigência do revogador como fim (regra anterior); publicação
+do revogador (mesmo problema); ler a cláusula de revogação no texto do revogador — é o caminho para
+ter a data certa, mas é extração de texto a fazer na recoleta em massa, não nestes 14 atos.
+
+**Ainda nesta revisão.** "Já na base" deixa de exigir a grafia do órgão (o legado varia); o coletor
+informa as arestas externas que não conseguiu ligar. Suspensão (SUS) segue como `interrompe` — é a
+classificação do portal (corSimbolo 3) e a da base —, com a sigla na observação. O Codex não revisou
+esta rodada (login expirado).
+
+**O que derrubaria.** O consumidor passar a precisar do fim para excluir revogados antigos em massa
+— aí a extração da cláusula de revogação deixa de ser opcional.
