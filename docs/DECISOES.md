@@ -260,3 +260,41 @@ conferência em outro arquivo.
 
 **O que derrubaria.** Precisar gravar em lote sem conferência (massa de atos no Haiku) — aí um
 `--sem-conferencia` explícito, decidido pelo dono.
+
+---
+
+## 2026-09-13 · Os 14 atos do marco entram direto em `rfb_atos` (etapa A), sem a área de espera
+
+**Decisão.** Do dono, no fim do dia 13/09, depois que o td-analise-piscofins publicou o `vigente_em`
+(atos_rfb 1.1.0, PR #235): os 14 atos que faltam para o marco dos manuais
+(`references/atos_marco_2026-09-13.csv` — 13 não vigentes e a SC COSIT 168/2026) são coletados no
+portal por `scripts/coletar_atos_portal.py` e gravados direto nas tabelas principais com ato, texto,
+relações e situação do portal — **sem matérias nem vetores** (a etapa B depende do filtro de
+vigência no td-analise-core, TI-7560). Substitui, para estes atos, a passagem pela área de espera do
+plano v2.
+
+**Regras do coletor.**
+- Um número pode ter mais de um ato no portal (IN SRF 247/2002 e IN RFB 1.717/2017 têm, cada uma,
+  uma retificação publicada como ato próprio): entram todos, ligados pela aresta `retifica`.
+- Relações com fonte `normasinternet2_portal`, a mesma do extrator antigo (é a que o filtro do
+  td-analise-piscofins aceita). Aresta cuja origem não está na base não cabe em `ato_relacao`
+  (origem obrigatória): fica em `situacao_portal.relacoes_sem_origem`. Aresta já dita pelo modelo
+  (llm-batch) que o portal confirma passa à fonte do portal, com antes/depois em `ato_mudanca`.
+- `data_vigencia_fim` (fim exclusivo) do não vigente: data de efeito da revogação (REV) publicada
+  pelo portal; na falta — o comum: nenhuma das revogações sondadas em 13/09 trazia a data —, o início
+  de vigência do ato revogador segundo o portal; na falta dele, a publicação do revogador. Várias
+  revogações: vale a mais antiga. Suspensão (SUS) e revogação parcial não fecham o ato. A origem da
+  data fica em `situacao_portal.fim_vigencia`.
+- Ato com trecho só em anexo PDF (IN 758/2007, 1.911/2019, 1.717/2017): grava o texto do JSON (a
+  1.911 tem 800 mil caracteres) e registra em `ato_coleta` quantos segmentos ficaram só no anexo.
+
+**Alternativas descartadas.**
+- *Área de espera e promoção depois* (plano v2): o dono preferiu fechar o marco com os atos
+  visíveis por identificador e no grafo, já carimbados pelo consumidor 1.1.0.
+- *Deixar `data_vigencia_fim` vazio quando o portal não publica a data de efeito*: o filtro do
+  consumidor não excluiria o ato revogado em nenhum período; o início de vigência do revogador é a
+  melhor data que o portal oferece, com a origem registrada para auditoria.
+
+**O que derrubaria.** Um ato revogado com cláusula de efeito diferida (revogação que só vale depois
+da vigência do revogador) — a data gravada seria cedo demais. Conferir por amostra quando a recoleta
+em massa rodar; se aparecer, ler a cláusula no texto do revogador.

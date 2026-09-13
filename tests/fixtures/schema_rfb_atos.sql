@@ -22,6 +22,8 @@ CREATE TABLE rfb_atos.ato (
     tipo_ato              TEXT NOT NULL,
     numero                TEXT,
     ano                   INTEGER,
+    identificador         TEXT,          -- da 004, conferido na nuvem em 13/09/2026
+    importado_em          TIMESTAMPTZ,   -- idem
     emissor               TEXT,
     data_publicacao       DATE,
     data_vigencia_inicio  DATE,
