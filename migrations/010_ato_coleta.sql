@@ -1,4 +1,4 @@
--- Migration 010 — estado de coleta por ato (rfb_atos)
+-- Migration 010 -- estado de coleta por ato (rfb_atos)
 --
 -- Problema que resolve
 -- --------------------
@@ -20,8 +20,11 @@
 -- regressao apontada no diagnostico do td-legislacao (D-19/D-20, 01/09/2026):
 -- nenhum ato pode ficar `analise_completa = true` sem conteudo.
 --
+-- Conferida contra o schema real da nuvem em 13/09/2026: `ato.id` e BIGINT (a
+-- versao anterior desta migration declarava `ato_coleta.ato_id` INTEGER).
+--
 -- Idempotente: pode rodar 2x sem efeito colateral.
--- DDL: requer papel com permissao de DDL no schema rfb_atos (nao o writer DML).
+-- DDL: rodar como `ratio_admin` (dono das tabelas), nao como o writer DML.
 
 SET search_path = rfb_atos, public;
 
@@ -30,7 +33,7 @@ SET search_path = rfb_atos, public;
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS rfb_atos.ato_coleta (
-    ato_id              INTEGER PRIMARY KEY
+    ato_id              BIGINT PRIMARY KEY
                         REFERENCES rfb_atos.ato(id) ON DELETE CASCADE,
 
     -- Resultado da ultima tentativa de obter o PDF/teor no portal.
@@ -141,6 +144,7 @@ SELECT a.id,
 --
 -- Entra como NOT VALID: a constraint passa a valer para toda escrita NOVA
 -- imediatamente, sem travar a migration nas 912 linhas legadas que ja violam.
+-- Por isso o categorize_with_llm.py passou a exigir texto ANTES desta migration.
 -- Depois de limpar o legado, rodar:
 --     ALTER TABLE rfb_atos.ato VALIDATE CONSTRAINT ato_analise_exige_conteudo;
 
@@ -208,3 +212,19 @@ SELECT a.id                                   AS ato_id,
 COMMENT ON VIEW rfb_atos.v_cobertura_ato IS
     'Funil de cobertura por ato: ato -> pdf -> texto -> materia -> embedding. '
     'Base do auditar_cobertura.py. Ver migration 010.';
+
+-- =====================================================================
+-- 6. Permissoes (so se os papeis existirem -- o CI nao tem esses papeis)
+-- =====================================================================
+-- Objetos criados depois do GRANT ... ON ALL TABLES de 13/09/2026 precisam do
+-- proprio GRANT: o time le (ratio_leitura); a coleta grava (rfb_writer).
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ratio_leitura') THEN
+        GRANT SELECT ON rfb_atos.ato_coleta, rfb_atos.v_cobertura_ato TO ratio_leitura;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rfb_writer') THEN
+        GRANT SELECT, INSERT, UPDATE ON rfb_atos.ato_coleta TO rfb_writer;
+    END IF;
+END $$;

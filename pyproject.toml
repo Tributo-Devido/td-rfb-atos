@@ -29,9 +29,9 @@ select = [
 # os tres em silencio, trocando um problema de estilo por um bug de runtime.
 
 [tool.ruff.lint.per-file-ignores]
-# Os tres scripts do path-hack acima. E402 (import fora do topo) e intencional:
-# o import so funciona depois do sys.path.insert.
-"scripts/reembed_cloud.py" = ["E402"]
+# Path-hack restante: o teste importa o script depois do sys.path.insert (E402 intencional).
+# O reembed_cloud.py deixou de precisar em 13/09/2026: o lib.embed_openai veio para scripts/lib
+# e o tests/conftest.py poe scripts/ no caminho de importacao.
 "tests/test_backfill_pdf.py" = ["E402"]
 
 # DIVIDA DECLARADA -- scripts de ETL herdados do tdax-3.0.

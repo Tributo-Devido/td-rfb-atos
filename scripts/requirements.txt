@@ -16,7 +16,11 @@ markitdown[pdf]>=0.0.1
 
 # LLM
 anthropic>=0.40.0
-google-generativeai>=0.8.0
+openai>=1.40.0            # vetores (scripts/lib/embed_openai.py)
+google-generativeai>=0.8.0  # legado: embed Gemini 1024 do Docker local
+
+# Credenciais (scripts/credenciais.py): opcional — sem boto3, cai para a CLI `aws`
+boto3>=1.34.0
 
 # Utils
 loguru>=0.7.0

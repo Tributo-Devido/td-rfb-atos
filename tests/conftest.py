@@ -10,8 +10,14 @@ variavel; localmente ela nao existe e os testes seguem pulando em silencio.
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 import pytest
+
+# scripts/ no caminho de importacao: os testes importam os modulos (credenciais, lib, ...)
+# do mesmo jeito que os scripts se importam entre si.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 
 def _dsn() -> str | None:

@@ -25,20 +25,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 import time
-from pathlib import Path
 
 import psycopg
 
-# Add lib path
-SCRIPTS_LIB = Path(r"c:/td-skills/td-creditos/scripts").resolve()
-sys.path.insert(0, str(SCRIPTS_LIB))
+from credenciais import resolver_dsn
 from lib.embed_openai import embed_texts, vector_literal
-
-
-CLOUD_DSN_PATH = Path(r"C:\Users\tribu\.claude-tg-bot\ratio-pg-dsn.txt")
-CLOUD_DSN = CLOUD_DSN_PATH.read_text(encoding="utf-8").strip()
 
 BATCH = 50           # textos por chamada OpenAI
 CONCURRENCY = 10     # chamadas concorrentes
@@ -98,6 +90,7 @@ async def reembed_chunk(rows: list[tuple], dst_dsn: str) -> int:
 
 async def main_async(limit: int | None):
     log("Conectando nuvem")
+    CLOUD_DSN = resolver_dsn("escrita")  # rfb_writer: grava o embedding em ato_materia
     conn = psycopg.connect(CLOUD_DSN)
 
     with conn.cursor() as cur:

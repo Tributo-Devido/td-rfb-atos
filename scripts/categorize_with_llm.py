@@ -252,7 +252,11 @@ def processar(limit: int | None = None, tipo_filter: str | None = None):
 
     client = Anthropic()
 
-    where = "a.analise_completa = FALSE"
+    # Só categoriza ato COM texto (JOIN, não LEFT JOIN). Categorizar "pela ementa" e marcar
+    # analise_completa = TRUE é um caminho para "analisado sem texto" (o diagnóstico de
+    # 13/09/2026 achou 912, sem matéria nenhuma — a origem provável é uma baixa avulsa) e
+    # violaria o invariante da migration 010 (ato_analise_exige_conteudo).
+    where = "a.analise_completa = FALSE AND a.content_disponivel = TRUE"
     params: list[Any] = []
     if tipo_filter:
         where += " AND a.tipo_ato = %s"
@@ -262,7 +266,7 @@ def processar(limit: int | None = None, tipo_filter: str | None = None):
         SELECT a.id, a.tipo_ato, a.numero, a.orgao_emissor, a.data_publicacao::text,
                a.ementa, c.content
         FROM atos a
-        LEFT JOIN ato_content c ON c.ato_id = a.id
+        JOIN ato_content c ON c.ato_id = a.id
         WHERE {where}
         ORDER BY a.data_publicacao DESC
     """
