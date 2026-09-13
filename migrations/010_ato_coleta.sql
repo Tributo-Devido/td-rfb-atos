@@ -1,4 +1,4 @@
--- Migration 010 — estado de coleta por ato (rfb_atos)
+-- Migration 010 -- estado de coleta por ato (rfb_atos)
 --
 -- Problema que resolve
 -- --------------------
