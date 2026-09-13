@@ -1,0 +1,24 @@
+# Banco
+psycopg[binary]>=3.2.0
+pgvector>=0.3.0
+python-dotenv>=1.0.0
+
+# HTTP / scraping
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Pandas (parser de tabelas SIJUT2)
+pandas>=2.2.0
+
+# PDF -> texto
+markitdown[pdf]>=0.0.1
+
+# LLM
+anthropic>=0.40.0
+google-generativeai>=0.8.0
+
+# Utils
+loguru>=0.7.0
+tenacity>=8.2.0  # retry com backoff
+tqdm>=4.66.0     # progress bars

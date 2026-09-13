@@ -11,7 +11,7 @@ Checks:
     5. Distribuição de sinal: AUTORIZA/VEDA/CONDICIONA/INDETERMINADO.
 
 Saída: relatório markdown em
-    c:/td-skills/td-rfb-atos/outputs/migration-validation-2026-05-11.md
+    outputs/migration-validation-2026-05-11.md (na raiz do repositório, fora do git)
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from lib.embed_openai import embed_texts_sync, vector_literal
 DOCKER_DSN = "postgresql://td:td@localhost:5435/td_rfb_atos"
 CLOUD_DSN = Path(r"C:\Users\tribu\.claude-tg-bot\ratio-pg-dsn.txt").read_text(encoding="utf-8").strip()
 
-OUTPUT_PATH = Path(r"c:/td-skills/td-rfb-atos/outputs/migration-validation-2026-05-11.md")
+OUTPUT_PATH = Path(__file__).resolve().parent.parent / "outputs" / "migration-validation-2026-05-11.md"
 
 
 PAIRS = [

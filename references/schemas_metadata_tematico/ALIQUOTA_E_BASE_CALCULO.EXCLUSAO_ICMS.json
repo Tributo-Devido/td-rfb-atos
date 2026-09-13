@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Schema metadata_tematico para ALIQUOTA_E_BASE_CALCULO.EXCLUSAO_ICMS",
+  "description": "Aplicado quando ato_materia.tema_especifico = 'ALIQUOTA_E_BASE_CALCULO.EXCLUSAO_ICMS'. Captura como Tema 69 STF foi aplicado na exclusão do ICMS da base de PIS/COFINS, e disputas paralelas (ICMS-ST, IPI, ISS).",
+  "type": "object",
+  "required": ["base_excluida", "modulacao_aplicavel"],
+  "properties": {
+    "base_excluida": {
+      "type": "string",
+      "enum": ["icms_destacado_nf", "icms_recolhido", "icms_st", "ipi_destacado", "iss_destacado", "outros"],
+      "description": "Qual o item excluído da base"
+    },
+    "modulacao_aplicavel": {
+      "type": "string",
+      "enum": ["pre_modulacao_15032017", "pos_modulacao_15032017", "transito_em_julgado_anterior", "ressalva_lei_complementar_182_2024", "nao_aplicavel"],
+      "description": "Modulação temporal do Tema 69 STF (15/03/2017) ou ressalva por LC 182/2024"
+    },
+    "tema_stf_aplicado": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Temas STF/STJ invocados",
+      "examples": [["Tema 69 STF", "Tema 1.125 STJ"]]
+    },
+    "alcance_decisao": {
+      "type": "string",
+      "enum": ["restituicao_compensacao", "apuracao_corrente", "apuracao_corrente_e_retroativa", "vedacao_credito_corresponente"],
+      "description": "Período em que a exclusão é aplicável"
+    },
+    "icms_st_inclusao_base_pis_cofins": {
+      "type": ["string", "null"],
+      "enum": ["sim", "nao", "nao_discutido", null],
+      "description": "Se discutiu ICMS-ST do substituído (Tema 1.125 STJ): incluir ou excluir da base"
+    },
+    "ressalva_aliquota_zero_creditos_acumulados": {
+      "type": ["boolean", "null"],
+      "description": "Se aplicou regra de não aproveitamento de créditos do ICMS quando há alíquota zero (Lei 14.789/2023)"
+    }
+  },
+  "additionalProperties": false
+}

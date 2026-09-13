@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Schema metadata_tematico para CLASSIFICACAO_FISCAL.PRODUTO",
+  "description": "Aplicado quando ato_materia.tema_especifico = 'CLASSIFICACAO_FISCAL.PRODUTO'. Captura disputa de NCM entre o que contribuinte pretendia, o que fazenda defendeu, e o que foi definido na decisão/orientação.",
+  "type": "object",
+  "required": ["produto_descricao", "ncm_definido"],
+  "properties": {
+    "produto_descricao": {
+      "type": "string",
+      "description": "Descrição técnica do produto em discussão (composição, processo, finalidade)",
+      "examples": ["Sobremesa gelada à base de leite com baixo teor lipídico", "Composto sintético utilizado como herbicida pré-emergente"]
+    },
+    "ncm_pretendido_contribuinte": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}(\\.\\d{2})?(\\.\\d{2})?$",
+      "description": "NCM que o contribuinte defendia (formato 2202, 2202.99 ou 2202.99.00). null se SC não disputou",
+      "examples": ["2202.99.00"]
+    },
+    "ncm_defendido_fazenda": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}(\\.\\d{2})?(\\.\\d{2})?$",
+      "description": "NCM que a fazenda defendia. null se SC não houve disputa",
+      "examples": ["2105.00.00"]
+    },
+    "ncm_definido": {
+      "type": "string",
+      "pattern": "^\\d{4}(\\.\\d{2})?(\\.\\d{2})?$",
+      "description": "NCM definido pela decisão/orientação (única certeza)",
+      "examples": ["2105.00.00"]
+    },
+    "capitulo_ncm": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{2}$",
+      "description": "Capítulo NCM (2 dígitos, derivado de ncm_definido)"
+    },
+    "posicao_ncm": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}$",
+      "description": "Posição NCM (4 dígitos)"
+    },
+    "requisitos_tecnicos": {
+      "type": "array",
+      "description": "Critérios técnicos que justificaram o enquadramento (composição, processo, características)",
+      "items": { "type": "string" },
+      "examples": [["composição lipídica acima de 5%", "processo de pasteurização", "consistência sólida a -18ºC"]]
+    },
+    "norma_classificadora": {
+      "type": ["string", "null"],
+      "description": "Norma técnica externa que define o produto (RDC ANVISA, IN MAPA, NBR, etc)",
+      "examples": ["RDC ANVISA nº 266/2005", "IN MAPA nº 16/2005"]
+    },
+    "regime_tributario_impactado": {
+      "type": "array",
+      "description": "Regimes tributários cuja aplicação dependia da classificação",
+      "items": { "type": "string", "enum": ["aliquota_zero", "monofasico", "substituicao_tributaria", "drawback", "isencao", "regime_geral", "regime_diferenciado"] }
+    },
+    "valor_economico_estimado": {
+      "type": ["number", "null"],
+      "description": "Valor do crédito/glosa em discussão (R$), se mencionado"
+    }
+  },
+  "additionalProperties": false
+}

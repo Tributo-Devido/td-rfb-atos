@@ -205,9 +205,13 @@ ANTHROPIC_API_KEY=sk-...                                 # categorização via H
 - `references/schemas_metadata_tematico/*.json` — schemas JSON Schema por tema_específico
 - `references/prompts/prompt_extrator_sc.md` — prompt LLM para extrair matérias de SC
 - `references/prompts/prompt_extrator_normativos.md` — prompt LLM para IN/Decreto/Portaria
-- `migrations/001_initial_schema.sql` — DDL completo
-- `migrations/002_taxonomia_seed.sql` — seed de taxonomia
-- `migrations/003_migrate_from_normas.sql` — migração dos dados existentes
+- `migrations/001_initial_schema.sql` — DDL inicial (Postgres local, Docker 5435)
+- `migrations/002_seed_taxonomia.sql` — seed de taxonomia
+- `migrations/003_add_id_portal.sql` … `008_sinal_materia.sql` — evolução do schema local
+  (id do portal, versão, segmentos, natureza, timeline/conflitos, sinal)
+- `migrations/010_ato_coleta.sql` — nuvem (`ratio.rfb_atos`). ⚠️ A numeração está partida:
+  as 004–006 **da nuvem** vivem em `tdax-3.0/td-creditos/migrations/` e são outras, não as
+  004–006 locais daqui. A 010 pressupõe as da nuvem.
 
 ## Status atual
 
