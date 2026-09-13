@@ -80,7 +80,7 @@ CADEIA_PISCOFINS = {("247", 2002), ("457", 2004), ("660", 2006), ("1717", 2017),
                     ("1911", 2019), ("2121", 2022)}
 
 LIMITE_PARTE = 60_000      # caracteres de teor por chamada (~17 mil tokens)
-MINIMO_PARTE = 8_000       # parte cortada no limite de tokens só é dividida se tiver 2x isto
+MINIMO_PARTE = 4_000       # parte cortada no limite de tokens só é dividida se tiver 2x isto
 MAX_TOKENS = 16_000        # abaixo do teto em que o SDK exige streaming sem aviso
 MAX_TOKENS_SINAL = 20      # o sinal é uma palavra
 FONTE_EMBEDDING = "openai_text_embedding_3_large_3072"
@@ -430,7 +430,7 @@ def _categorizar_parte(ato: dict, parte: Parte, total: int, sistema: list[dict],
     uso.somar(modelo, r.uso, do_disco)
     if r.parada == "max_tokens":
         # muitas matérias para caber na resposta: divide o trecho em dois e pede cada metade
-        if len(parte.texto) < 2 * MINIMO_PARTE or profundidade >= 2:
+        if len(parte.texto) < 2 * MINIMO_PARTE or profundidade >= 3:
             raise FalhaCategorizacao(f"parte {parte.rotulo}: resposta cortada no limite de tokens")
         saidas: list[dict] = []
         for i, sub in enumerate(particionar(parte.texto, len(parte.texto) // 2 + 1), 1):
@@ -477,7 +477,7 @@ def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
         saidas += _categorizar_parte(ato, parte, len(partes), sistema, chamar, modelo=modelo,
                                      uso=uso)
     materias, meta = juntar(saidas)
-    meta["partes"] = len(saidas)
+    meta["partes"], meta["chamadas"] = len(partes), len(saidas)
     return materias, meta
 
 
@@ -491,8 +491,53 @@ def _texto(v) -> str | None:
     return json.dumps(v, ensure_ascii=False)
 
 
-def linha_materia(m: dict, ordem: int) -> dict:
-    """Normaliza uma matéria do modelo (mesmas regras do categorize_batch.py)."""
+NOME_DO_TIPO = {
+    "INSTRUCAO_NORMATIVA": "Instrução Normativa",
+    "INSTRUCAO_NORMATIVA_CONJUNTA": "Instrução Normativa Conjunta",
+    "SOLUCAO_CONSULTA": "Solução de Consulta",
+    "SOLUCAO_DIVERGENCIA": "Solução de Divergência",
+    "PARECER_NORMATIVO": "Parecer Normativo",
+    "ATO_DECLARATORIO_INTERPRETATIVO": "Ato Declaratório Interpretativo",
+    "ATO_DECLARATORIO_EXECUTIVO": "Ato Declaratório Executivo",
+    "PORTARIA": "Portaria",
+    "DECRETO": "Decreto",
+}
+
+
+def norma_do_ato(ato: dict) -> tuple[str, str]:
+    """(tipo_norma, referência) do próprio ato, no formato que o td-analise-piscofins casa por
+    tipo + número + ano (`atos_rfb.normalizar_norma`). O número vai com ponto de milhar: sem ele,
+    o leitor de lá toma "2121" por 212."""
+    nome = NOME_DO_TIPO.get(ato["tipo_ato"], str(ato["tipo_ato"]).replace("_", " ").title())
+    digitos = re.sub(r"\D", "", str(ato["numero"] or ""))
+    numero = f"{int(digitos):,}".replace(",", ".") if digitos else str(ato["numero"])
+    emissor = f" {ato['emissor']}" if ato.get("emissor") else ""
+    return str(ato["tipo_ato"]).lower(), f"{nome}{emissor} nº {numero}/{ato['ano']}"
+
+
+def rotulo_dispositivo(d: dict) -> str | None:
+    """{"artigo": "171", "paragrafo": "2º", "inciso": "IV"} -> "art. 171, § 2º, inciso IV"."""
+    artigo = str(d.get("artigo") or "").strip()
+    if not artigo:
+        return None
+    partes = [artigo if artigo.lower().startswith("art") else f"art. {artigo}"]
+    if d.get("paragrafo"):
+        par = str(d["paragrafo"]).strip()
+        partes.append(par if par.startswith("§") or par.lower().startswith("par") else f"§ {par}")
+    if d.get("inciso"):
+        partes.append(f"inciso {str(d['inciso']).strip()}")
+    if d.get("alinea"):
+        partes.append(f"alínea {str(d['alinea']).strip()}")
+    return ", ".join(partes)
+
+
+def linha_materia(m: dict, ordem: int, norma_ato: tuple[str, str] | None = None) -> dict:
+    """Normaliza uma matéria do modelo (mesmas regras do categorize_batch.py).
+
+    Com `norma_ato` (de `norma_do_ato`), os artigos do próprio ato que a matéria cobre
+    (`dispositivos_do_ato`) viram linhas de materia_dispositivo com tipo_uso 'dispositivo_do_ato':
+    a busca por "IN 2.121, art. 171" passa a achar a matéria da própria IN.
+    """
     tema_macro = normalizar_tema_macro(m.get("tema_macro")) or "__NOVO_TEMA"
     tema_esp = (normalizar_tema_especifico(m.get("tema_especifico") or f"{tema_macro}.OUTRO",
                                            tema_macro) or f"{tema_macro}.OUTRO")
@@ -518,6 +563,10 @@ def linha_materia(m: dict, ordem: int) -> dict:
                 normalizar_tipo_norma(f.get("tipo_fonte")) or f.get("tipo_fonte"),
                 _texto(f.get("referencia")), None, _texto(f.get("texto_resumido")),
                 "fundamento_externo"))
+    for d in (m.get("dispositivos_do_ato") or []) if norma_ato else []:
+        if isinstance(d, dict) and (rotulo := rotulo_dispositivo(d)):
+            dispositivos.append((*norma_ato, rotulo, _texto(d.get("texto_resumido")),
+                                 "dispositivo_do_ato"))
     cnaes: dict[str, tuple] = {}
     for c in m.get("cnaes_aplicaveis") or []:
         if isinstance(c, dict) and c.get("codigo"):   # sem código não dá para gravar
@@ -630,11 +679,12 @@ def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: st
 
 
 def classificar_sinais(conn, ato_id: int, ids: list[int], chamar, *, uso: Uso) -> dict[str, int]:
-    """Sinal das matérias `ids` que ainda não têm (só as com solução, como no script antigo)."""
+    """Sinal das matérias `ids` que ainda não têm. O script antigo exigia `solucao`; em norma, o
+    extrator às vezes só preenche o trecho, e sem sinal a matéria some da busca filtrada."""
     linhas = conn.execute(
         "SELECT id, tema_especifico, natureza, ementa_trecho, fato_consultado, solucao "
-        "FROM rfb_atos.ato_materia WHERE id = ANY(%s) AND sinal IS NULL AND solucao IS NOT NULL "
-        "ORDER BY id", (ids,)).fetchall()
+        "FROM rfb_atos.ato_materia WHERE id = ANY(%s) AND sinal IS NULL "
+        "AND (solucao IS NOT NULL OR ementa_trecho IS NOT NULL) ORDER BY id", (ids,)).fetchall()
     sistema = [{"type": "text", "text": PROMPT_SINAL}]
     contagem: dict[str, int] = {}
     for mid, tema, natureza, ementa, fato, solucao in linhas:
@@ -655,6 +705,14 @@ def classificar_sinais(conn, ato_id: int, ids: list[int], chamar, *, uso: Uso) -
     return contagem
 
 
+def _cast_embedding(tipo: str | None) -> str:
+    """O tipo vai para dentro do SQL: só passa o esperado (halfvec/vector com dimensão; text no
+    banco de teste)."""
+    if not re.fullmatch(r"text|halfvec\(\d+\)|vector\(\d+\)", tipo or ""):
+        raise RuntimeError(f"tipo inesperado da coluna embedding: {tipo!r}")
+    return tipo
+
+
 def vetorizar(conn, ids: list[int], *, embed=None) -> int:
     """Vetor das matérias `ids` que ainda não têm. Não toca em llm_model (é da categorização)."""
     linhas = conn.execute(
@@ -667,9 +725,10 @@ def vetorizar(conn, ids: list[int], *, embed=None) -> int:
     if len(vetores) != len(linhas) or any(len(v) != DEFAULT_DIM for v in vetores):
         raise RuntimeError(f"vetores fora do formato: esperado {len(linhas)} x {DEFAULT_DIM}")
     # tipo da coluna vem do catálogo: halfvec(3072) na nuvem, text no banco de teste
-    tipo = conn.execute(
-        "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
-        "WHERE attrelid = 'rfb_atos.ato_materia'::regclass AND attname = 'embedding'").fetchone()[0]
+    tipo = _cast_embedding(conn.execute(
+        "SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid = "
+        "'rfb_atos.ato_materia'::regclass AND attname = 'embedding' AND attnum > 0 "
+        "AND NOT attisdropped").fetchone()[0])
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
             f"UPDATE rfb_atos.ato_materia SET embedding = %s::{tipo}, embedded_at = now(), "
@@ -714,17 +773,47 @@ def processar_ato(conn, ato: dict, chamar, *, modelo: str, run_id: str, uso: Uso
             raise AtoInapto(f"ato {ato['id']} já está com analise_completa")
         materias, meta = categorizar(ato, ato["texto_completo"], chamar, modelo=modelo, uso=uso,
                                      limite=limite)
-        linhas = [linha_materia(m, i) for i, m in enumerate(materias, 1)]
+        norma = norma_do_ato(ato)
+        linhas = [linha_materia(m, i, norma) for i, m in enumerate(materias, 1)]
         ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id)
         partes = meta["partes"]
     else:
         ids = [r[0] for r in conn.execute(
             "SELECT id FROM rfb_atos.ato_materia WHERE ato_id = %s ORDER BY ordem", (ato["id"],))]
         partes = 0
-    return {"ato_id": ato["id"], "categorizado_agora": agora, "partes": partes,
-            "materias": len(ids),
-            "sinal": classificar_sinais(conn, ato["id"], ids, chamar, uso=uso) if sinal else {},
-            "vetores": vetorizar(conn, ids, embed=embed) if vetor else 0}
+    resumo = {"ato_id": ato["id"], "categorizado_agora": agora, "partes": partes,
+              "materias": len(ids),
+              "sinal": classificar_sinais(conn, ato["id"], ids, chamar, uso=uso) if sinal else {},
+              "vetores": vetorizar(conn, ids, embed=embed) if vetor else 0}
+    sem_sinal, sem_vetor = conn.execute(
+        "SELECT count(*) FILTER (WHERE sinal IS NULL), count(*) FILTER (WHERE embedding IS NULL) "
+        "FROM rfb_atos.ato_materia WHERE id = ANY(%s)", (ids,)).fetchone()
+    return {**resumo, "sem_sinal": sem_sinal, "sem_vetor": sem_vetor}
+
+
+def executar_lote(conn, atos: list[dict], chamar, *, run_id: str, uso: Uso,
+                  modelo: str | None = None, sinal: bool = True, vetor: bool = True,
+                  embed=None, limite: int | None = None, saida=print) -> list[dict]:
+    """Um ato por vez; um ato com problema não derruba os outros. As matérias gravadas ficam (a
+    transação delas já fechou): rodar `--ato` de novo completa sinal e vetor."""
+    resultados: list[dict] = []
+    for a in atos:
+        escolhido = modelo or escolher_modelo(a["tipo_ato"], a["numero"], a["ano"])
+        try:
+            resumo = processar_ato(conn, a, chamar, modelo=escolhido, run_id=run_id, uso=uso,
+                                   sinal=sinal, vetor=vetor, embed=embed, limite=limite)
+        except (AtoInapto, FalhaCategorizacao) as e:
+            saida(f"[pulado] ato {a['id']}: {e}")
+            resultados.append({"ato_id": a["id"], "erro": str(e)})
+            continue
+        except Exception as e:
+            saida(f"[erro] ato {a['id']}: {type(e).__name__}: {e} (rode --ato {a['id']} de novo "
+                  "para completar sinal e vetor)")
+            resultados.append({"ato_id": a["id"], "erro": f"{type(e).__name__}: {e}"})
+            continue
+        saida(f"[ok] run {run_id}: {resumo}")
+        resultados.append(resumo)
+    return resultados
 
 
 # ---------------------------------------------------------------------------
@@ -814,17 +903,9 @@ def main() -> None:
             return
 
         exigir_schema(conn)
-        chamar = chamador_anthropic()
         uso = Uso()
-        for a in atos:
-            modelo = args.modelo or escolher_modelo(a["tipo_ato"], a["numero"], a["ano"])
-            try:
-                resumo = processar_ato(conn, a, chamar, modelo=modelo, run_id=run_id, uso=uso,
-                                       sinal=not args.sem_sinal, vetor=not args.sem_vetor)
-            except (AtoInapto, FalhaCategorizacao) as e:
-                print(f"[pulado] ato {a['id']}: {e}")
-                continue
-            print(f"[ok] run {run_id}: {resumo}")
+        executar_lote(conn, atos, chamador_anthropic(), run_id=run_id, uso=uso,
+                      modelo=args.modelo, sinal=not args.sem_sinal, vetor=not args.sem_vetor)
         for modelo, d in uso.por_modelo.items():
             print(f"uso {modelo}: {d}")
         print(f"custo das chamadas (preço de referência): ~US$ {uso.custo():.2f}")

@@ -29,7 +29,8 @@ o que não existia na origem e o que ficou pendente está em [`MIGRACAO.md`](MIG
 | `scripts/run_pipeline.py` | pipeline diário: crawl → download → extract → categorize → embed |
 | `scripts/extract_sijut.py`, `fetch_normasinternet2.py` | coleta no SIJUT2 |
 | `scripts/download_pdf.py`, `extract_content.py` | PDF do ato e texto (MarkItDown) |
-| `scripts/categorize_with_llm.py`, `categorize_batch.py` | matérias via Haiku 4.5 (online e em lote) |
+| `scripts/categorizar_nuvem.py` | **nuvem:** matérias, sinal e vetor por ato (ato longo em partes pelos cabeçalhos; Sonnet na cadeia de PIS/COFINS, Haiku no resto; plano sem custo por padrão) |
+| `scripts/categorize_with_llm.py`, `categorize_batch.py` | legado (Docker local): matérias via Haiku 4.5 (online e em lote) |
 | `scripts/embed_chunks.py`, `retrieve.py` | embeddings legados (Gemini 1024) e busca híbrida |
 | `scripts/timeline.py`, `detectar_conflitos.py`, `classificar_sinal_haiku.py` | linha do tempo, conflitos e sinal AUTORIZA/VEDA |
 | `scripts/db.py` | resolução de DSN + conexão (nuvem por padrão, `--local` para Docker) |

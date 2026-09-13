@@ -19,6 +19,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 DSN = os.environ.get("PGTEST_DSN")
 precisa_banco = pytest.mark.skipif(not DSN, reason="defina PGTEST_DSN (Postgres descartável)")
 ATO = 900101
+REFERENCIA_IN = "Instrução Normativa RFB nº 2.121/2022"
 
 
 def _ato(**kw) -> dict:
@@ -41,21 +42,26 @@ def _texto_longo(titulos: int = 6, artigos: int = 6, preambulo: bool = True) -> 
     return "\n\n".join(blocos)
 
 
-def _materia(n: int) -> dict:
-    return {"ordem": 1, "natureza": "dispositivo", "tema_macro": "CREDITAMENTO",
-            "tema_especifico": "CREDITAMENTO.CONCEITO_INSUMO", "tags": "insumo",
-            "tributos": [{"codigo": "PIS/COFINS", "regime": "não-cumulativo"}],
-            "dispositivos": [{"tipo_norma": "Lei", "referencia": "Lei nº 10.833/2003",
-                              "dispositivo": "art. 3º, II", "tipo_uso": "regulamentacao"}],
-            "cnaes_aplicaveis": [{"codigo": "1011-2/01", "confianca": 0.9}, "setor sem código"],
-            "ementa_trecho": f"trecho {n}", "solucao": f"solução da parte {n}"}
+def _materia(n: int, *, com_solucao: bool = True) -> dict:
+    m = {"ordem": 1, "natureza": "dispositivo", "tema_macro": "CREDITAMENTO",
+         "tema_especifico": "CREDITAMENTO.CONCEITO_INSUMO", "tags": "insumo",
+         "tributos": [{"codigo": "PIS/COFINS", "regime": "não-cumulativo"}],
+         "dispositivos": [{"tipo_norma": "Lei", "referencia": "Lei nº 10.833/2003",
+                           "dispositivo": "art. 3º, II", "tipo_uso": "regulamentacao"}],
+         "dispositivos_do_ato": [{"artigo": str(n), "paragrafo": "único"}],
+         "cnaes_aplicaveis": [{"codigo": "1011-2/01", "confianca": 0.9}, "setor sem código"],
+         "ementa_trecho": f"trecho {n}"}
+    if com_solucao:
+        m["solucao"] = f"solução da parte {n}"
+    return m
 
 
 class FalsoModelo:
     """Faz as vezes da API: uma matéria por chamada; o sinal responde VEDA."""
 
-    def __init__(self, *, falhar_na: int | None = None, cortar_acima: int | None = None):
-        self.falhar_na, self.cortar_acima = falhar_na, cortar_acima
+    def __init__(self, *, falhar_na: int | None = None, cortar_acima: int | None = None,
+                 com_solucao: bool = True):
+        self.falhar_na, self.cortar_acima, self.com_solucao = falhar_na, cortar_acima, com_solucao
         self.mensagens: list[str] = []
         self.sistemas: list[list[dict]] = []
         self.sinais = 0
@@ -73,7 +79,7 @@ class FalsoModelo:
             return cn.Resposta('{"materias": [', "max_tokens", {"saida": cn.MAX_TOKENS})
         corpo = {"ato_metadata": {"eficacia": "vinculante_geral",
                                   "norma_base_regulamentada": [{"referencia": "Lei 10.833/2003"}]},
-                 "materias": [_materia(n)],
+                 "materias": [_materia(n, com_solucao=self.com_solucao)],
                  "relacoes_com_outros_atos": [{"tipo_relacao": "revoga", "ato_destino": {
                      "tipo_ato": "INSTRUCAO_NORMATIVA", "numero": "1911", "ano": 2019}}]}
         return cn.Resposta("```json\n" + json.dumps(corpo, ensure_ascii=False) + "\n```",
@@ -182,15 +188,35 @@ def test_materia_normalizada_com_tributo_composto_separado():
     assert set(linha["_tributos"]) == {("PIS", "nao_cumulativo"), ("COFINS", "nao_cumulativo")}
     assert linha["tags"] == ["insumo"]
     assert linha["_cnaes"] == {"1011-2/01": (None, None, "0.9")}   # o "setor sem código" sai
+    # sem a norma do ato, os dispositivos_do_ato não viram linha
     assert linha["_dispositivos"] == [("lei", "Lei nº 10.833/2003", "art. 3º, II", None,
                                        "regulamentacao")]
+
+
+def test_tributo_sem_codigo_ou_rejeitado_nao_vira_linha():
+    """Revisão 4-LLM (Grok) temia NULL em materia_tributo.tributo_codigo (NOT NULL): o
+    decompositor só devolve código canônico."""
+    m = {"tributos": [{"codigo": None}, {"codigo": "IN"}, "6912", {"regime": "lucro_real"}, 7]}
+    linha = cn.linha_materia(m, 1)
+    assert linha["_tributos"] == [] and linha["tributos"] == [] and linha["regimes"] == []
+
+
+def test_artigos_do_proprio_ato_viram_dispositivo_casavel():
+    norma = cn.norma_do_ato(_ato())
+    assert norma == ("instrucao_normativa", REFERENCIA_IN)   # "2.121": sem o ponto vira 212
+    m = {**_materia(1), "dispositivos_do_ato": [
+        {"artigo": "171", "paragrafo": "2º", "inciso": "IV", "alinea": "a"}, {"artigo": None}]}
+    proprios = [d for d in cn.linha_materia(m, 1, norma)["_dispositivos"]
+                if d[4] == "dispositivo_do_ato"]
+    assert proprios == [("instrucao_normativa", REFERENCIA_IN,
+                         "art. 171, § 2º, inciso IV, alínea a", None, "dispositivo_do_ato")]
 
 
 def test_varias_partes_numeradas_e_metadados_juntos():
     modelo = FalsoModelo()
     materias, meta = cn.categorizar(_ato(), _texto_longo(), modelo, modelo=cn.MODELO_CADEIA,
                                     uso=cn.Uso(), limite=5000)
-    assert meta["partes"] == len(modelo.mensagens) == len(materias) > 1
+    assert meta["partes"] == meta["chamadas"] == len(modelo.mensagens) == len(materias) > 1
     assert "PARTE 2 de" in modelo.mensagens[1] and "<br>" not in modelo.mensagens[1]
     assert "CONTEUDO COMPLETO" not in modelo.mensagens[1]
     assert meta["eficacia"] == "vinculante_geral"
@@ -201,8 +227,17 @@ def test_resposta_cortada_divide_a_parte_em_duas():
     texto = _texto_longo(titulos=1, artigos=40, preambulo=False)      # ~26 mil: uma parte só
     modelo = FalsoModelo(cortar_acima=18_000)
     materias, meta = cn.categorizar(_ato(), texto, modelo, modelo=cn.MODELO_MASSA, uso=cn.Uso())
-    assert meta["partes"] >= 2 and len(materias) == meta["partes"]
+    assert meta["partes"] == 1 and meta["chamadas"] == len(materias) >= 2
     assert "PARTE 1.1 de 1" in modelo.mensagens[1]
+
+
+def test_parte_curta_cortada_tambem_divide():
+    """Revisão 4-LLM (Grok): com o mínimo antigo (8 mil x 2), um trecho denso de ~10 mil
+    caracteres cortado no limite de tokens derrubava o ato inteiro."""
+    texto = _texto_longo(titulos=1, artigos=15, preambulo=False)      # ~9,5 mil
+    modelo = FalsoModelo(cortar_acima=6_000)
+    _, meta = cn.categorizar(_ato(), texto, modelo, modelo=cn.MODELO_MASSA, uso=cn.Uso())
+    assert meta["chamadas"] >= 2
 
 
 def test_falha_numa_parte_derruba_o_ato_inteiro():
@@ -218,6 +253,14 @@ def test_resposta_guardada_nao_e_paga_de_novo():
         cn.categorizar(_ato(), "Art. 1º Texto curto.", modelo, modelo=cn.MODELO_MASSA, uso=uso)
     assert len(modelo.mensagens) == 1
     assert usos[1].por_modelo[cn.MODELO_MASSA]["do_disco"] == 1 and usos[1].custo() == 0
+
+
+def test_tipo_da_coluna_de_vetor_so_passa_o_esperado():
+    assert cn._cast_embedding("halfvec(3072)") == "halfvec(3072)"
+    assert cn._cast_embedding("text") == "text"
+    for ruim in ("halfvec", "text; DROP TABLE x", None):
+        with pytest.raises(RuntimeError):
+            cn._cast_embedding(ruim)
 
 
 def test_plano_estima_partes_e_custo():
@@ -276,6 +319,7 @@ def test_grava_materias_sinal_e_vetor_e_nenhuma_relacao(conn):
     resumo = _processar(conn, modelo)
     n = len(modelo.mensagens)
     assert resumo["materias"] == resumo["vetores"] == n > 1 and resumo["sinal"] == {"VEDA": n}
+    assert resumo["sem_sinal"] == resumo["sem_vetor"] == 0
 
     ordens = [r[0] for r in conn.execute(
         "SELECT ordem FROM rfb_atos.ato_materia WHERE ato_id = %s ORDER BY ordem", (ATO,))]
@@ -290,9 +334,15 @@ def test_grava_materias_sinal_e_vetor_e_nenhuma_relacao(conn):
         "rfb_atos.ato_materia m ON m.id = t.materia_id WHERE m.ato_id = %s AND m.ordem = 1 "
         "ORDER BY 1", (ATO,)).fetchall() == [("COFINS", "nao_cumulativo"),
                                             ("PIS", "nao_cumulativo")]
-    assert _um(conn, "SELECT count(*) FROM rfb_atos.materia_dispositivo d JOIN "
-                     "rfb_atos.ato_materia m ON m.id = d.materia_id WHERE m.ato_id = %s",
-               ATO) == (n,)
+    usos = dict(conn.execute(
+        "SELECT d.tipo_uso, count(*) FROM rfb_atos.materia_dispositivo d JOIN "
+        "rfb_atos.ato_materia m ON m.id = d.materia_id WHERE m.ato_id = %s GROUP BY 1",
+        (ATO,)).fetchall())
+    assert usos == {"regulamentacao": n, "dispositivo_do_ato": n}
+    assert _um(conn, "SELECT d.referencia, d.dispositivo FROM rfb_atos.materia_dispositivo d "
+                     "JOIN rfb_atos.ato_materia m ON m.id = d.materia_id WHERE m.ato_id = %s "
+                     "AND m.ordem = 1 AND d.tipo_uso = 'dispositivo_do_ato'", ATO) == (
+        REFERENCIA_IN, "art. 1, § único")
     assert _um(conn, "SELECT c.confianca FROM rfb_atos.materia_cnae c JOIN rfb_atos.ato_materia m "
                      "ON m.id = c.materia_id WHERE m.ato_id = %s AND m.ordem = 1", ATO) == ("0.9",)
 
@@ -308,6 +358,12 @@ def test_grava_materias_sinal_e_vetor_e_nenhuma_relacao(conn):
     # a matéria antiga sem vetor (seed, ato 3) não é tocada: o vetor é só das matérias do ato
     assert _um(conn, "SELECT embedding FROM rfb_atos.ato_materia WHERE ato_id = 3 AND ordem = 2"
                ) == (None,)
+
+
+@precisa_banco
+def test_materia_sem_solucao_recebe_sinal_pelo_trecho(conn):
+    resumo = _processar(conn, FalsoModelo(com_solucao=False))
+    assert resumo["sem_sinal"] == 0 and sum(resumo["sinal"].values()) == resumo["materias"]
 
 
 @precisa_banco
@@ -327,6 +383,28 @@ def test_falha_numa_parte_nao_grava_nada(conn):
         _processar(conn, FalsoModelo(falhar_na=2))
     assert _um(conn, "SELECT count(*) FROM rfb_atos.ato_materia WHERE ato_id = %s", ATO) == (0,)
     assert _um(conn, "SELECT analise_completa FROM rfb_atos.ato WHERE id = %s", ATO) == (False,)
+
+
+@precisa_banco
+def test_erro_inesperado_num_ato_nao_derruba_o_lote(conn):
+    """Revisão 4-LLM (Grok): uma falha fora de AtoInapto/FalhaCategorizacao (API de vetor fora do
+    ar, por exemplo) parava o lote inteiro."""
+    chamadas = []
+
+    def vetor_instavel(textos):
+        chamadas.append(1)
+        if len(chamadas) == 1:
+            raise RuntimeError("OpenAI fora do ar")
+        return _vetores(textos)
+
+    atos = cn.carregar_atos(conn, ids=[2, ATO])        # ato 2 (seed) vem primeiro e falha
+    resultados = cn.executar_lote(conn, atos, FalsoModelo(), run_id="lote", uso=cn.Uso(),
+                                  embed=vetor_instavel, limite=5000, saida=lambda _: None)
+    assert resultados[0]["erro"].startswith("RuntimeError") and resultados[1]["materias"] > 1
+    # as matérias do ato 2 ficaram, sem vetor; rodar de novo completa sem pedir matéria de novo
+    de_novo = cn.executar_lote(conn, cn.carregar_atos(conn, ids=[2]), FalsoModelo(),
+                               run_id="lote2", uso=cn.Uso(), embed=_vetores, saida=lambda _: None)
+    assert de_novo[0]["categorizado_agora"] is False and de_novo[0]["sem_vetor"] == 0
 
 
 @precisa_banco
