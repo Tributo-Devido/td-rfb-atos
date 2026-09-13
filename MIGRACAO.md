@@ -94,8 +94,9 @@ robocopy C:\td-skills\td-rfb-atos C:\td-rfb-atos /E /XC /XN /XO `
       `C:\td-rfb-atos-dados\_legado-td-skills\`. Os 9 arquivos que eram rastreados no git
       do td-skills (branch `feat/rfb-atos-embed`) aparecem lá como apagados, sem commit
 - [ ] Decidir o destino das migrations `004`/`005`/`006` da nuvem (item 2)
-- [ ] `reembed_cloud.py` e `validate_cloud_parity.py` importam `lib.embed_openai`, que mora
-      em `td-creditos/scripts/lib/` — trazer para cá ou empacotar
+- [x] `reembed_cloud.py` e `validate_cloud_parity.py` importavam `lib.embed_openai` do
+      `td-creditos` — trazido para `scripts/lib/` em 13/09/2026, com credenciais via
+      `scripts/credenciais.py` (sem o `ratio-pg-dsn.txt`)
 - [ ] Aplicar a migration 010 no `ratio` (ainda não aplicada)
 - [ ] A base parou em 06/07/2026 (último ato: 03/07/2026) — as correções do extrator
       (listagem sem filtro de vigentes, as quatro visões, relações para atos fora da

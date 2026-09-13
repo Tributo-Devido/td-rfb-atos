@@ -63,7 +63,6 @@ from pathlib import Path
 import psycopg
 
 SCHEMA = "rfb_atos"
-CLOUD_DSN_FILE = Path(r"C:\Users\tribu\.claude-tg-bot\ratio-pg-dsn.txt")
 PDF_DIR_PADRAO = Path(os.environ.get("RFB_ATOS_PDF_DIR", "./pdfs"))
 
 BASE_SIJUT = "https://normas.receita.fazenda.gov.br/sijut2consulta"
@@ -225,14 +224,18 @@ def abrir_sessao():
 # ----------------------------------------------------------------------
 # Banco
 # ----------------------------------------------------------------------
-def resolver_dsn(cli: str | None) -> str:
+def resolver_dsn(cli: str | None, escrita: bool = False) -> str:
+    """--dsn > RFB_ATOS_DSN > credenciais (leitura; escrita so com --aplicar)."""
     if cli:
         return cli
     if os.environ.get("RFB_ATOS_DSN"):
         return os.environ["RFB_ATOS_DSN"]
-    if CLOUD_DSN_FILE.exists():
-        return CLOUD_DSN_FILE.read_text(encoding="utf-8").strip()
-    sys.exit("[erro] sem DSN. Use --dsn ou exporte RFB_ATOS_DSN.")
+    from credenciais import CredencialAusente
+    from credenciais import resolver_dsn as credencial
+    try:
+        return credencial("escrita" if escrita else "leitura")
+    except CredencialAusente as e:
+        sys.exit(f"[erro] {e} Ou use --dsn.")
 
 
 def exigir_010(conn) -> None:
@@ -478,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     origem = f"backfill_pdf@{time.strftime('%Y-%m-%d')}"
-    with psycopg.connect(resolver_dsn(args.dsn)) as conn:
+    with psycopg.connect(resolver_dsn(args.dsn, escrita=args.aplicar)) as conn:
         conn.execute(f"SET search_path = {SCHEMA}, public")
         exigir_010(conn)
         fila = montar_fila(conn, args)

@@ -47,9 +47,6 @@ import psycopg
 
 SCHEMA = "rfb_atos"
 
-# DSN da nuvem quando o script roda na maquina do analista (Windows).
-CLOUD_DSN_FILE = Path(r"C:\Users\tribu\.claude-tg-bot\ratio-pg-dsn.txt")
-
 # Atos que o diagnostico do td-legislacao (D-19/D-20, 01/09/2026) nomeou.
 # Servem de canario: se a revisao nao os mostra, a revisao esta errada.
 FOCO_PADRAO = [
@@ -64,18 +61,18 @@ FOCO_PADRAO = [
 # Conexao
 # ----------------------------------------------------------------------
 def resolver_dsn(cli_dsn: str | None) -> str:
-    """--dsn > RFB_ATOS_DSN > arquivo de DSN da nuvem."""
+    """--dsn > RFB_ATOS_DSN > credenciais (`ratio_leitura`: env -> SSM /td/db/ratio-pg-dsn)."""
     if cli_dsn:
         return cli_dsn
     env = os.environ.get("RFB_ATOS_DSN")
     if env:
         return env
-    if CLOUD_DSN_FILE.exists():
-        return CLOUD_DSN_FILE.read_text(encoding="utf-8").strip()
-    sys.exit(
-        "[erro] sem DSN. Use --dsn, ou exporte RFB_ATOS_DSN, ou garanta o "
-        f"tunnel SSM e o arquivo {CLOUD_DSN_FILE}."
-    )
+    from credenciais import CredencialAusente
+    from credenciais import resolver_dsn as credencial
+    try:
+        return credencial("leitura")
+    except CredencialAusente as e:
+        sys.exit(f"[erro] {e} Ou use --dsn.")
 
 
 def conectar(dsn: str) -> psycopg.Connection:

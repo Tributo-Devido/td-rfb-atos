@@ -21,13 +21,10 @@ from pathlib import Path
 
 import psycopg
 
-SCRIPTS_LIB = Path(r"c:/td-skills/td-creditos/scripts").resolve()
-sys.path.insert(0, str(SCRIPTS_LIB))
+from credenciais import resolver_dsn
 from lib.embed_openai import embed_texts_sync, vector_literal
 
-
 DOCKER_DSN = "postgresql://td:td@localhost:5435/td_rfb_atos"
-CLOUD_DSN = Path(r"C:\Users\tribu\.claude-tg-bot\ratio-pg-dsn.txt").read_text(encoding="utf-8").strip()
 
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "outputs" / "migration-validation-2026-05-11.md"
 
@@ -187,7 +184,7 @@ def main():
 
     log("Conectando Docker e Nuvem")
     src = psycopg.connect(DOCKER_DSN)
-    dst = psycopg.connect(CLOUD_DSN)
+    dst = psycopg.connect(resolver_dsn("leitura"))
 
     log("1. Contagens por tabela")
     ok_counts = check_counts(src, dst, report)

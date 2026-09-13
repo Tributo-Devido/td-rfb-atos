@@ -44,9 +44,14 @@ o que não existia na origem e o que ficou pendente está em [`MIGRACAO.md`](MIG
 | `tests/` | 46 testes contra Postgres real |
 
 Os scripts do pipeline de coleta não têm teste e estão dispensados só das regras
-cosméticas do lint (bloco "dívida declarada" no `pyproject.toml`). `reembed_cloud.py` e
-`validate_cloud_parity.py` ainda importam `lib.embed_openai`, que mora em `td-creditos` —
-não rodam sozinhos a partir deste repositório.
+cosméticas do lint (bloco "dívida declarada" no `pyproject.toml`).
+
+**Credenciais** (`scripts/credenciais.py`): variável de ambiente → SSM, nunca arquivo local.
+Leitura como `ratio_leitura` (`/td/db/ratio-pg-dsn`, o padrão de todo script), escrita como
+`rfb_writer` (`/td/batch/rfb-writer-dsn`), chave da OpenAI em `/td/llm/openai-api-key`.
+`RFB_ATOS_DSN` continua valendo por cima de tudo (testes e CI). Os vetores usam
+`scripts/lib/embed_openai.py` (OpenAI `text-embedding-3-large`, 3072) — o repositório não
+depende mais do `td-creditos`.
 
 ## Dados fora do git
 

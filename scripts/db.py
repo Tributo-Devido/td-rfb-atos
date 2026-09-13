@@ -1,26 +1,27 @@
 """
 db.py — Conexão Postgres + helpers de cursor para todos os scripts.
 
-A partir de 2026-05-11, a base canônica é a NUVEM (ratio.rfb_atos.*), não mais
-o Docker local. O Docker local segue funcional como histórico/legado mas o
-ponto-de-verdade do produto é a nuvem.
+A base canônica é a NUVEM (`ratio.rfb_atos.*`). O Docker local segue como legado.
 
 Resolução de DSN:
-    1. env var RFB_ATOS_DSN explícita → usa esse.
-    2. Se --local CLI flag estiver no sys.argv → usa Docker local
-       (postgresql://td:td@localhost:5435/td_rfb_atos).
-    3. Default: lê DSN da nuvem de C:\\Users\\tribu\\.claude-tg-bot\\ratio-pg-dsn.txt.
+    1. env var `RFB_ATOS_DSN` explícita → usa esse (testes e CI).
+    2. `--local` no sys.argv → Docker local (postgresql://td:td@localhost:5435/td_rfb_atos).
+    3. Default: `credenciais.resolver_dsn(...)` — variável de ambiente → SSM, nunca arquivo:
+         get_conn()              → leitura (`ratio_leitura`, /td/db/ratio-pg-dsn)
+         get_conn(escrita=True)  → escrita (`rfb_writer`, /td/batch/rfb-writer-dsn)
+       (até 13/09/2026 o default lia ~/.claude-tg-bot/ratio-pg-dsn.txt, com DSN de admin.)
 
 Schema:
-    - Nuvem: `rfb_atos.*` (set search_path automaticamente).
+    - Nuvem: `rfb_atos.*` (search_path ajustado automaticamente).
     - Local: `public.*` (default).
 
 Uso:
-    from db import get_conn, get_legacy_conn
+    from db import get_conn
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
+    with get_conn() as conn:                 # leitura
+        ...
+    with get_conn(escrita=True) as conn:     # coleta / carga
+        ...
 """
 from __future__ import annotations
 
@@ -31,6 +32,8 @@ from pathlib import Path
 
 import psycopg
 from dotenv import load_dotenv
+
+from credenciais import CredencialAusente, resolver_dsn
 
 try:
     from pgvector.psycopg import register_vector
@@ -44,10 +47,9 @@ if ENV_PATH.exists():
 
 
 DOCKER_LOCAL_DSN = "postgresql://td:td@localhost:5435/td_rfb_atos"
-CLOUD_DSN_FILE = Path(r"C:\Users\tribu\.claude-tg-bot\ratio-pg-dsn.txt")
 
 
-def _resolve_dsn() -> tuple[str, str]:
+def _resolve_dsn(escrita: bool = False) -> tuple[str, str]:
     """Returns (dsn, mode) where mode is 'cloud' or 'local'."""
     # 1. Env var explícita
     dsn = os.environ.get("RFB_ATOS_DSN")
@@ -57,20 +59,16 @@ def _resolve_dsn() -> tuple[str, str]:
     # 2. CLI flag --local
     if "--local" in sys.argv:
         return DOCKER_LOCAL_DSN, "local"
-    # 3. Default: nuvem
-    if CLOUD_DSN_FILE.exists():
-        return CLOUD_DSN_FILE.read_text(encoding="utf-8").strip(), "cloud"
-    # 4. Fallback: legacy .env PG_DSN
-    legacy = os.environ.get("PG_DSN")
-    if legacy:
-        mode = "local" if "5435" in legacy else "cloud"
-        return legacy, mode
-    sys.exit("[erro] Sem DSN: defina RFB_ATOS_DSN, use --local, ou crie ratio-pg-dsn.txt")
+    # 3. Default: nuvem, pela credencial do papel pedido
+    try:
+        return resolver_dsn("escrita" if escrita else "leitura"), "cloud"
+    except CredencialAusente as e:
+        sys.exit(f"[erro] {e} Ou defina RFB_ATOS_DSN, ou use --local para o Docker legado.")
 
 
-def get_conn() -> psycopg.Connection:
-    """Conexão ao banco canônico (nuvem por default; --local pra Docker)."""
-    dsn, mode = _resolve_dsn()
+def get_conn(escrita: bool = False) -> psycopg.Connection:
+    """Conexão ao banco canônico: leitura por padrão; `escrita=True` para coleta e carga."""
+    dsn, mode = _resolve_dsn(escrita)
     conn = psycopg.connect(dsn)
     # Schema search_path: nuvem usa rfb_atos.*, local usa public.*
     if mode == "cloud":
@@ -109,23 +107,23 @@ def get_legacy_conn() -> psycopg.Connection:
 
 
 @contextmanager
-def cursor():
+def cursor(escrita: bool = False):
     """Context manager: with cursor() as cur: ..."""
-    with get_conn() as conn, conn.cursor() as cur:
+    with get_conn(escrita) as conn, conn.cursor() as cur:
         yield cur
         conn.commit()
 
 
 if __name__ == "__main__":
-    # Smoke test
+    # Smoke test (leitura)
     dsn, mode = _resolve_dsn()
     print(f"DSN resolvido: modo={mode}")
     print("             : (DSN não exibido por segurança)")
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT current_database(), current_schema, version()")
-        db, schema, ver = cur.fetchone()
+        cur.execute("SELECT current_database(), current_user, version()")
+        db, usuario, ver = cur.fetchone()
         print(f"  Database: {db}")
-        print(f"  Schema:   {schema}")
+        print(f"  Usuário:  {usuario}")
         print(f"  Version:  {ver.split(',')[0]}")
         if mode == "cloud":
             cur.execute("SELECT COUNT(*) FROM rfb_atos.ato")

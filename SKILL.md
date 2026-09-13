@@ -151,7 +151,7 @@ Eixos de reflexão **adaptados para SC** (vs CARF):
 **Banco canônico (NUVEM):** `ratio.rfb_atos.*` em `ratio-pg-prod`, acessado via SSM tunnel em `localhost:15432`.
 
 ```
-DSN nuvem: lido de C:\Users\tribu\.claude-tg-bot\ratio-pg-dsn.txt (formato postgresql://...:15432/ratio)
+DSN nuvem: scripts/credenciais.py — leitura ratio_leitura (SSM /td/db/ratio-pg-dsn), escrita rfb_writer (SSM /td/batch/rfb-writer-dsn); acesso direto pela VPN (ratio-pg-prod...:5432)
 Watchdog do tunnel: ~/.claude-tg-bot/subir-tunnel-watchdog.ps1 (reabre automaticamente)
 ```
 
@@ -175,7 +175,7 @@ export RFB_ATOS_DSN=postgresql://td:td@localhost:5435/td_rfb_atos
 python script.py
 ```
 
-**Embeddings:** OpenAI `text-embedding-3-large` (3072-dim, halfvec). Helper compartilhado em `c:/td-skills/td-creditos/scripts/lib/embed_openai.py`. API key vem do `.env` do td-carf.
+**Embeddings:** OpenAI `text-embedding-3-large` (3072-dim, halfvec). Helper em `scripts/lib/embed_openai.py`; a chave vem de `scripts/credenciais.py` (`OPENAI_API_KEY` → SSM `/td/llm/openai-api-key`). **Credenciais do banco:** leitura `ratio_leitura` (`/td/db/ratio-pg-dsn`), escrita `rfb_writer` (`/td/batch/rfb-writer-dsn`) — variável de ambiente → SSM, sem arquivo local.
 
 **Banco LOCAL Docker (legado para pipeline de coleta):**
 
