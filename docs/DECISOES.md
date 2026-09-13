@@ -122,3 +122,25 @@ passa a resolver variável de ambiente → SSM, sem arquivo local.
 
 **Alternativa descartada.** Escrever como `ratio_admin` (`/td/admin/...`): contraria o padrão "uma
 credencial por vertical" do runbook e dá privilégio de DDL a scripts de coleta.
+
+---
+
+## 2026-09-13 · Texto de uma visão do portal = segmentos com `omitir` falso
+
+**Decisão.** `scripts/visoes_portal.py`: o texto de uma visão (vigente ou original) é a
+concatenação, na ordem do ato, dos segmentos com `omitir = false`. Todas as versões continuam
+guardadas em `ato_segmento`, com as marcas.
+
+**Evidência.** IN RFB 2.121/2022 (idAto 127905), visões baixadas do portal em 13/09: com a regra,
+0 dispositivos com mais de uma versão nas duas visões e o art. 171 só na redação atual.
+
+**Alternativas descartadas.**
+- *Concatenar todos os segmentos* (extrator antigo): repete redações antigas (art. 171 três vezes,
+  +16% de texto) — é o D12 do plano.
+- *Filtrar por `compilado`*: perde 237 segmentos que o portal exibe na vigente e o art. 171 inteiro
+  na original.
+- *Reconstruir pela visão "exclusiva"* (o `in2121_original.json` do disco): 1.169 segmentos a menos
+  que a visão vigente real — o arquivo não serve de fonte.
+
+**O que derrubaria.** Um ato em que a visão exibida pelo site difira do texto montado pela regra —
+conferir por amostra na F2 (atos alterados de tipos diferentes).

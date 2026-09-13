@@ -21,6 +21,17 @@ Igual à v1, §2, com duas correções:
   (o ato revogado) nunca esteve na base e a aresta era descartada (`:255-258`). O consumidor já tem a
   família `interrompe` e declara `revoga` como ausente (`atos_rfb.py:840-847`) — **não gravar `revoga`**.
 - **D7 corrigido:** ~1,1 mil atos novos desde 03/07 (5,5 mil/ano × ~72 dias), não 1,5 mil.
+- **D3, número exato (conferência do schema, 13/09):** o grafo tem **5** arestas `interrompe`
+  vindas do portal (revogações entre dois atos que já estavam na base) — não zero.
+- **D12 (novo, medido na IN 2.121 contra o portal):** em cada visão o portal manda todos os
+  segmentos de todas as versões e marca com `omitir` os que não aparecem; **mostrar = `omitir`
+  falso** dá uma versão por dispositivo. O extrator antigo (`consolidar_texto_vigente`)
+  concatena **todos** — no texto guardado dos atos alterados (~3,6 mil `vigente_alterado`)
+  **redações antigas estão misturadas com as atuais** (na IN 2.121: art. 171 três vezes, +16%).
+  Vai para a F2c (extrator com a regra) e para a F3 (reprocessar o texto vigente dos alterados,
+  com `ato_mudanca`) — é correção do que o time lê hoje; comunicar.
+- **Timeout não explica a IN 2.121:** a visão vigente (3,45 MB) respondeu em 2 s; a falha dela
+  segue atribuída à baixa avulsa (D5).
 
 ## 3. Princípios
 
