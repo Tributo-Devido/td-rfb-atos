@@ -326,3 +326,22 @@ esta rodada (login expirado).
 
 **O que derrubaria.** O consumidor passar a precisar do fim para excluir revogados antigos em massa
 — aí a extração da cláusula de revogação deixa de ser opcional.
+
+---
+
+## 2026-09-13 · Consolidação das matérias da IN 2.121: não é necessária (medido)
+
+**Decisão.** Fecha a questão reaberta na entrada "Conferir antes de gravar": as 425 matérias da IN
+RFB 2.121/2022 ficam como estão, sem passo de consolidação.
+
+**Evidência.** Relatório do `--gerar` (13/09): 838 de 885 artigos citados (95%), 5 artigos citados
+por mais de uma matéria, semelhança máxima 0,6 entre as soluções dessas matérias. Depois do
+`--executar`, nos vetores: 90.100 pares, só 4 com semelhança ≥ 0,95 e 43 ≥ 0,90 (média 0,585); os
+pares mais próximos são regras diferentes (alíquota zero na venda × na importação de mercadoria
+equivalente; crédito presumido na exportação de café × na aquisição de café em grão).
+
+**Alternativa descartada.** Deduplicação conservadora (tema + tributo + regime, proposta do Codex):
+não há duplicata equivalente para remover.
+
+**O que derrubaria.** Consulta do time devolvendo várias matérias da 2.121 com o mesmo conteúdo
+no top-k — aí medir de novo com os pares acima de 0,90.
