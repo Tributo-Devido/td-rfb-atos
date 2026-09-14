@@ -22,8 +22,10 @@ CREATE TABLE rfb_atos.ato (
     tipo_ato              TEXT NOT NULL,
     numero                TEXT,
     ano                   INTEGER,
-    identificador         TEXT,          -- da 004, conferido na nuvem em 13/09/2026
-    importado_em          TIMESTAMPTZ,   -- idem
+    -- coluna GERADA na nuvem (pg_get_expr conferido em 13/09/2026): INSERT não pode informá-la
+    identificador         TEXT GENERATED ALWAYS AS
+                          ((((tipo_ato || ' ') || numero) || '/') || (ano)::text) STORED,
+    importado_em          TIMESTAMPTZ,   -- da 004, conferido na nuvem em 13/09/2026
     emissor               TEXT,
     data_publicacao       DATE,
     data_vigencia_inicio  DATE,

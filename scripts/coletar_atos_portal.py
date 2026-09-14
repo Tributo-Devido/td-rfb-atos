@@ -324,11 +324,12 @@ def ligar_pendentes(conn, ato_id: int, id_portal: int, run_id: str) -> int:
     return len(ligadas)
 
 
+# `identificador` não entra: na nuvem é coluna gerada (tipo_ato || ' ' || numero || '/' || ano)
 SQL_ATO = (
-    "INSERT INTO rfb_atos.ato (tipo_ato, numero, ano, identificador, emissor, data_publicacao, "
+    "INSERT INTO rfb_atos.ato (tipo_ato, numero, ano, emissor, data_publicacao, "
     "ementa, link, url_html, id_portal, eficacia_atual, pdf_disponivel, content_disponivel, "
     "analise_completa, fonte_origem, importado_de, importado_em) VALUES (%(tipo_ato)s, "
-    "%(numero)s, %(ano)s, %(identificador)s, %(emissor)s, %(data_publicacao)s, %(ementa)s, "
+    "%(numero)s, %(ano)s, %(emissor)s, %(data_publicacao)s, %(ementa)s, "
     "%(link)s, %(url_html)s, %(id_portal)s, %(eficacia_atual)s, %(pdf_disponivel)s, false, false, "
     "'sijut2_rfb', 'recoleta_portal', now()) RETURNING id")
 
