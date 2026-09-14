@@ -72,12 +72,18 @@ def exigir_schema(conn) -> None:
 
 def aplicar(conn, ato_id: int, vigente: dict, original: dict | None, *, run_id: str,
             origem_vigente: str, caminho_original: str | None = None,
-            bytes_baixados: int | None = None) -> dict:
-    """Grava o ato numa transação; devolve um resumo. Idempotente para as mesmas visões."""
+            bytes_baixados: int | None = None, permitir_anexo_pdf: bool = False) -> dict:
+    """Grava o ato numa transação; devolve um resumo. Idempotente para as mesmas visões.
+
+    Com `permitir_anexo_pdf`, aceita ato em que algum segmento exibido só existe como anexo PDF
+    (a IN 1.911/2019, por exemplo, tem 800 mil caracteres em texto e anexos em PDF): grava o texto
+    do JSON e registra em ato_coleta quantos segmentos ficaram só no anexo, não extraídos."""
     texto = vp.texto_da_visao(vigente)
     if not texto:
         raise ValueError("a visão vigente não tem texto exibível")
-    if vp.corpo_em_pdf(vigente):
+    anexos_pdf = sum(1 for s in vp.segmentos_exibidos(vigente)
+                     if s.get("arquivoBinario") and not vp.normalizar(s.get("textoIntegra")))
+    if anexos_pdf and not permitir_anexo_pdf:
         raise ValueError("o corpo do ato está em anexo PDF — este carregador não extrai PDF")
     mudancas: list[tuple[str, str, object, object]] = []
     with conn.transaction():
@@ -185,7 +191,9 @@ def aplicar(conn, ato_id: int, vigente: dict, original: dict | None, *, run_id: 
             "content_type = EXCLUDED.content_type, bytes_baixados = EXCLUDED.bytes_baixados, "
             "sha256 = EXCLUDED.sha256, origem = EXCLUDED.origem, observacao = EXCLUDED.observacao",
             (ato_id, origem_vigente, bytes_baixados, vp.sha256(texto),
-             f"teor da visão vigente do portal (run {run_id})"))
+             f"teor da visão vigente do portal (run {run_id})"
+             + (f"; {anexos_pdf} segmento(s) só em anexo PDF, não extraído(s)"
+                if anexos_pdf else "")))
 
         with conn.cursor() as cur:
             cur.executemany(

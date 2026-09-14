@@ -65,12 +65,15 @@ async def reembed_chunk(rows: list[tuple], dst_dsn: str) -> int:
     vecs = await embed_texts(texts, batch_size=BATCH, concurrency=CONCURRENCY)
     # UPDATE em lote — usa executemany para reduzir round-trips no tunnel
     params = [
-        (vector_literal(vec), "openai_text_embedding_3_large_3072", "text-embedding-3-large", mid)
+        (vector_literal(vec), "openai_text_embedding_3_large_3072", mid)
         # strict=True: se embed_texts devolver menos vetores que textos, o zip
         # truncaria em silencio e as materias do fim do lote ficariam sem
         # embedding sem erro nenhum -- some da busca semantica e nada avisa.
         for mid, vec in zip(ids, vecs, strict=True)
     ]
+    # llm_model NAO e tocado aqui: e o modelo que categorizou a materia (auditoria da
+    # categorizacao). Ate 13/09/2026 este UPDATE gravava "text-embedding-3-large" nele e
+    # apagava essa informacao; o modelo do vetor ja fica em embedding_source.
     with psycopg.connect(dst_dsn) as conn:
         with conn.cursor() as cur:
             cur.executemany(
@@ -78,8 +81,7 @@ async def reembed_chunk(rows: list[tuple], dst_dsn: str) -> int:
                 UPDATE rfb_atos.ato_materia
                    SET embedding = %s::halfvec,
                        embedded_at = now(),
-                       embedding_source = %s,
-                       llm_model = %s
+                       embedding_source = %s
                  WHERE id = %s
                 """,
                 params,
