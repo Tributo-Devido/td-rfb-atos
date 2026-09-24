@@ -248,16 +248,30 @@ def _fim_legivel(fim: date | None, auditoria: dict | None) -> str:
 # Banco
 # ---------------------------------------------------------------------------
 
+_LEGADO_POR_LINK: dict[int, int] | None = None
+
+
+def _legado_por_link(conn) -> dict[int, int]:
+    """idAto -> ato.id da parte da base importada sem id_portal (o idAto só está no link). Lido uma
+    vez por processo: linha nova sempre tem id_portal, então este mapa não muda na rodada."""
+    global _LEGADO_POR_LINK
+    if _LEGADO_POR_LINK is None:
+        _LEGADO_POR_LINK = {}
+        for id_ato, ato_id in conn.execute(
+                "SELECT (regexp_match(link, '/externa/([0-9]+)/'))[1]::int, id "
+                "FROM rfb_atos.ato WHERE id_portal IS NULL AND link ~ '/externa/[0-9]+/' "
+                "ORDER BY id DESC"):
+            _LEGADO_POR_LINK[id_ato] = ato_id
+    return _LEGADO_POR_LINK
+
+
 def _id_por_portal(conn, id_portal: int) -> int | None:
     linha = conn.execute("SELECT id FROM rfb_atos.ato WHERE id_portal = %s ORDER BY id LIMIT 1",
                          (id_portal,)).fetchone()
     if linha:
         return linha[0]
     # parte da base (importada do SIJUT) tem id_portal vazio e o idAto só no link
-    linha = conn.execute(
-        "SELECT id FROM rfb_atos.ato WHERE id_portal IS NULL AND link LIKE %s ORDER BY id LIMIT 1",
-        (f"%/externa/{id_portal}/%",)).fetchone()
-    return linha[0] if linha else None
+    return _legado_por_link(conn).get(id_portal)
 
 
 def _mudanca(conn, run_id: str, ato_id: int, tabela: str, campo: str, antes, depois) -> None:
@@ -386,16 +400,12 @@ def gravar_ato(conn, linha: dict, vigente: dict, original: dict | None, relacion
 
 def ids_na_base(conn, ids: list[int]) -> set[int]:
     """Quais desses idAto já estão na base — pelo id_portal e, na parte do legado sem id_portal,
-    pelo idAto do link. Duas consultas para a listagem inteira (e não uma por linha)."""
+    pelo idAto do link. Uma consulta para a listagem inteira (e não uma por linha)."""
     if not ids:
         return set()
     achados = {r[0] for r in conn.execute(
         "SELECT id_portal FROM rfb_atos.ato WHERE id_portal = ANY(%s)", (ids,))}
-    if len(achados) < len(set(ids)):
-        achados |= {r[0] for r in conn.execute(
-            "SELECT (regexp_match(link, '/externa/([0-9]+)/'))[1]::int FROM rfb_atos.ato "
-            "WHERE id_portal IS NULL AND link ~ '/externa/[0-9]+/'")} & set(ids)
-    return achados
+    return achados | (set(_legado_por_link(conn)) & set(ids))
 
 
 def ja_na_base(conn, linha: dict) -> int | None:

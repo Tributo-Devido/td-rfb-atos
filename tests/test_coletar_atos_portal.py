@@ -194,6 +194,7 @@ def _executar(conn, arquivo: str) -> None:
 @pytest.fixture
 def conn(tmp_path, monkeypatch):
     monkeypatch.setenv("RFB_ATOS_DADOS", str(tmp_path))
+    monkeypatch.setattr(col, "_LEGADO_POR_LINK", None)   # o mapa do legado é por processo
     with psycopg.connect(DSN, autocommit=True) as c:
         _limpar(c)
         _executar(c, "tests/fixtures/schema_rfb_atos.sql")
