@@ -66,8 +66,31 @@ def estimar_lote(atos: list[dict], modelo: str | None = None) -> float:
     return DESCONTO_LOTE * sum(cn.estimar(a, modelo or cn.MODELO_PADRAO)["custo"] for a in atos)
 
 
+def em_voo() -> set[int]:
+    """Atos que estão num lote enviado e ainda não baixado (não podem ir de novo)."""
+    return {a for m in manifestos("enviado") for a in m["atos"]}
+
+
 def enviar(atos: list[dict], cliente, *, modelo: str | None = None, limite: int | None = None,
-           saida=print) -> list[str]:
+           teto_usd: float | None = None, saida=print) -> list[str]:
+    voando = em_voo()
+    if voando:
+        antes = len(atos)
+        atos = [a for a in atos if a["id"] not in voando]
+        if antes != len(atos):
+            saida(f"[lote] {antes - len(atos)} atos já estão num lote em andamento: ficam fora")
+    if teto_usd is not None:
+        escolhidos, gasto = [], 0.0
+        for a in atos:
+            custo = estimar_lote([a], modelo)
+            if gasto + custo > teto_usd:
+                break
+            escolhidos.append(a)
+            gasto += custo
+        if len(escolhidos) < len(atos):
+            saida(f"[lote] teto de US$ {teto_usd:.2f}: vão {len(escolhidos)} de {len(atos)} atos "
+                  f"(~US$ {gasto:.2f}, estimativa conservadora)")
+        atos = escolhidos
     todos, fora = pedidos(atos, modelo=modelo, limite=limite)
     if fora:
         saida(f"[lote] {len(fora)} atos fora do lote (o modo automático trata sem modelo)")

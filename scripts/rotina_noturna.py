@@ -3,9 +3,12 @@
 Uma rodada por noite (Agendador de Tarefas do Windows, `rotina_noturna.ps1`):
   1. coleta: tudo o que o portal publicou desde a última publicação da base (menos 10 dias de
      folga) e falta na base — todos os tipos de ato (`coletar_atos_portal.coletar_novos`);
-  2. categorização automática com portão de qualidade (`categorizar_nuvem.automatico`), só dos
-     tipos liberados em `references/rotina_noturna.json` — cada tipo só entra depois da rodada de
-     pesquisa dele (decisão do dono em 24/09/2026); o que reprova vai para revisão;
+  2. categorização pela API em lote da Anthropic (metade do preço; `lote_categorizacao`):
+     a) aplica os lotes que terminaram — portão de qualidade e gravação; o que reprova vai para
+        revisão; b) envia um lote novo com a fila dos tipos liberados em
+        `references/rotina_noturna.json` (cada tipo só entra depois da rodada de pesquisa dele —
+        decisão do dono em 24/09/2026), até o teto de gasto da noite. O que é enviado numa noite
+        é gravado na seguinte;
   3. resumo em RFB_ATOS_DADOS/rotina/AAAA-MM-DD.json e log em AAAA-MM-DD.log.
 
 Trava contra duas rodadas ao mesmo tempo (rotina/rotina.lock; vencida após 12 h). Um passo com
@@ -31,6 +34,7 @@ import psycopg
 
 import categorizar_nuvem as cn
 import coletar_atos_portal as col
+import lote_categorizacao as lc
 
 CONFIG = Path(__file__).resolve().parent.parent / "references" / "rotina_noturna.json"
 FOLGA = timedelta(days=10)
@@ -86,7 +90,7 @@ def janela_de_coleta(ultima: date | None, hoje: date | None = None) -> date:
 
 
 def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
-           portal=None, chamar=None, embed=None, log=print) -> dict:
+           portal=None, chamar=None, embed=None, cliente_lote=None, log=print) -> dict:
     run_id = f"rotina-{time.strftime('%Y%m%dT%H%M%S')}"
     resumo: dict = {"run_id": run_id, "inicio": time.strftime("%Y-%m-%dT%H:%M:%S")}
     with psycopg.connect(dsn, autocommit=True) as conn:
@@ -105,32 +109,40 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                 log(f"[coleta] ERRO {type(e).__name__}: {e}")
                 resumo["coleta"] = {"erro": f"{type(e).__name__}: {e}"}
         try:
-            atos = cn.carregar_atos(conn, pendentes=True, limit=cfg["limite_atos_por_noite"],
-                                    tipos=cfg["tipos_categorizar"])
-            estimado = sum(cn.estimar(a, cn.MODELO_PADRAO)["custo"] for a in atos)
-            log(f"[categorização] {len(atos)} atos na fila dos tipos liberados "
-                f"{cfg['tipos_categorizar']} | estimado ~US$ {estimado:.2f} | teto da noite "
-                f"US$ {cfg['teto_usd_por_noite']:.2f}")
-            if plano:
-                resumo["categorizacao"] = {"fila": len(atos), "estimado_usd": round(estimado, 2)}
-            else:
+            cliente = cliente_lote or (None if plano else lc.cliente_anthropic())
+            if not plano:
                 cn.exigir_schema(conn)
                 cn.exigir_permissoes(conn)
-                uso = cn.Uso()
-                r = cn.automatico(
-                    atos, chamar or cn.chamador_anthropic(),
-                    conectar=lambda: psycopg.connect(dsn, autocommit=True), run_id=run_id,
-                    uso=uso, embed=embed, paralelo=cfg["paralelo"],
-                    teto_usd=cfg["teto_usd_por_noite"], custo_max_ato=cfg["custo_max_ato"],
-                    saida=log)
-                estados: dict[str, int] = {}
-                for x in r:
-                    e = ("revisar" if x.get("revisar") else "erro" if x.get("erro")
-                         else "pulado" if x.get("pulado") else "gravado")
-                    estados[e] = estados.get(e, 0) + 1
-                resumo["categorizacao"] = {"fila": len(atos), **estados,
-                                           "custo_usd": round(uso.custo(), 2),
-                                           "uso": uso.por_modelo}
+                aplicados = []
+                for m in lc.manifestos():
+                    if m["estado"] not in ("enviado", "baixado"):
+                        continue
+                    res = lc.aplicar(
+                        m["batch_id"], cliente,
+                        conectar=lambda: psycopg.connect(dsn, autocommit=True),
+                        chamar=chamar or cn.chamador_anthropic(), embed=embed,
+                        paralelo=cfg["paralelo"], saida=log)
+                    if res:
+                        aplicados.append({"batch_id": m["batch_id"], "atos": len(res),
+                                          "gravados": sum(1 for x in res if x.get("materias")),
+                                          "revisar": sum(1 for x in res if x.get("revisar")),
+                                          "erros": sum(1 for x in res if x.get("erro"))})
+                resumo["lotes_aplicados"] = aplicados
+            atos = cn.carregar_atos(conn, pendentes=True, limit=cfg["limite_atos_por_noite"],
+                                    tipos=cfg["tipos_categorizar"])
+            log(f"[categorização] {len(atos)} atos na fila dos tipos liberados "
+                f"{cfg['tipos_categorizar']} | ~US$ {lc.estimar_lote(atos):.2f} no lote "
+                f"(estimativa conservadora) | teto da noite US$ {cfg['teto_usd_por_noite']:.2f}")
+            if plano:
+                resumo["categorizacao"] = {"fila": len(atos)}
+            else:
+                ids = lc.enviar(atos, cliente, teto_usd=cfg["teto_usd_por_noite"], saida=log)
+                # o que nem vai ao lote (só ementa curta demais) sai da fila, para revisão
+                _, fora = lc.pedidos([a for a in atos if a["id"] not in lc.em_voo()])
+                for f in fora:
+                    cn.marcar_revisao(conn, f["ato_id"], run_id, [f["motivo"]])
+                resumo["categorizacao"] = {"fila": len(atos), "lotes_enviados": ids,
+                                           "para_revisao_sem_modelo": len(fora)}
         except SystemExit as e:
             log(f"[categorização] ERRO {e}")
             resumo["categorizacao"] = {"erro": str(e)}
@@ -142,6 +154,8 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
 
 
 def teve_erro(resumo: dict) -> bool:
+    if any(x.get("erros") for x in resumo.get("lotes_aplicados") or []):
+        return True
     return any(isinstance(resumo.get(k), dict) and (resumo[k].get("erro") or resumo[k].get(
         "erros")) for k in ("coleta", "categorizacao"))
 

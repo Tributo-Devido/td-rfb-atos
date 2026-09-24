@@ -10,6 +10,7 @@ import rotina_noturna as rn
 from test_categorizar_nuvem import FalsoModelo, _vetores
 from test_coletar_atos_portal import IN, PortalFalso, _linha_html, _listagem
 from test_coletar_atos_portal import conn  # noqa: F401  (fixture: banco como rfb_writer)
+from test_lote_categorizacao import LoteFalso, _cliente
 
 DSN = os.environ.get("PGTEST_DSN")
 precisa_banco = pytest.mark.skipif(not DSN, reason="defina PGTEST_DSN (Postgres descartável)")
@@ -54,12 +55,16 @@ def test_rodada_coleta_e_categoriza_so_os_tipos_liberados(conn, monkeypatch):  #
     cfg = {"tipos_categorizar": ["SOLUCAO_CONSULTA"], "coletar_tipos": ["INSTRUCAO_NORMATIVA"],
            "teto_usd_por_noite": 5.0, "custo_max_ato": 3.0, "limite_atos_por_noite": 10,
            "paralelo": 2}
+    lote = LoteFalso()
     resumo = rn.rodada(cfg, dsn=DSN, portal=portal, chamar=FalsoModelo(), embed=_vetores,
-                       log=lambda _t: None)
+                       cliente_lote=_cliente(lote), log=lambda _t: None)
     assert resumo["coleta"]["gravados"] == 1 and resumo["coleta"]["erros"] == 0
-    # só SOLUCAO_CONSULTA está liberada: a fila é a SC do seed (ato 2, texto curto demais: vai
-    # para revisão), e a IN recém-coletada fica sem análise
-    assert resumo["categorizacao"]["fila"] == 1 and resumo["categorizacao"]["revisar"] == 1
+    # só SOLUCAO_CONSULTA está liberada: a fila é a SC do seed (ato 2, texto curto demais: fica
+    # fora do lote — o automático a manda para revisão sem modelo), e a IN coletada fica sem análise
+    assert resumo["categorizacao"]["fila"] == 1 and resumo["categorizacao"]["lotes_enviados"] == []
+    assert lote.lotes == {} and resumo["categorizacao"]["para_revisao_sem_modelo"] == 1
+    assert conn.execute("SELECT metadados ? 'categorizacao_revisao' FROM rfb_atos.ato WHERE id = 2"
+                        ).fetchone() == (True,)
     assert conn.execute("SELECT analise_completa FROM rfb_atos.ato WHERE id_portal = 15123"
                         ).fetchone() == (False,)
     assert conn.execute("SELECT count(*) FROM rfb_atos.ato WHERE id_portal = 15123"
