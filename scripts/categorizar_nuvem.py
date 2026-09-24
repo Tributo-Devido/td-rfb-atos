@@ -124,7 +124,9 @@ REGRAS_SAIDA = (
     "- Responda APENAS um JSON valido conforme o schema do prompt acima.\n"
     "- NAO inclua texto antes ou depois do JSON.\n"
     "- NAO use markdown code fences (```).\n"
-    "- Comece a resposta diretamente com '{' e termine com '}'."
+    "- Comece a resposta diretamente com '{' e termine com '}'.\n"
+    "- JSON COMPACTO: numa linha só, sem indentação nem espaços fora dos textos (a resposta é "
+    "paga por token)."
 )
 
 _CABECALHO = re.compile(
@@ -440,14 +442,21 @@ def _dir_respostas(ato_id: int) -> Path:
     return base / "categorizacao" / str(ato_id)
 
 
+def arquivo_resposta(ato_id: int, modelo: str, sistema: list[dict], usuario: str,
+                     max_tokens: int) -> Path:
+    """Onde fica a resposta de um pedido: o nome é o hash de modelo + prompts + trecho +
+    max_tokens (o mesmo para a chamada direta e para o lote)."""
+    pedido = json.dumps([modelo, sistema, usuario, max_tokens], ensure_ascii=False)
+    return _dir_respostas(ato_id) / f"{hashlib.sha256(pedido.encode()).hexdigest()[:24]}.json"
+
+
 def chamar_com_disco(chamar, ato_id: int, modelo: str, sistema: list[dict], usuario: str,
                      max_tokens: int, *, aceitar,
                      so_disco: bool = False) -> tuple[Resposta, bool]:
     """Chama o modelo ou reaproveita a resposta guardada para exatamente o mesmo pedido — a chave
     é o hash de modelo + prompts + trecho + max_tokens. Só guarda resposta que `aceitar` aprova.
     Com `so_disco` não chama: sem a resposta guardada, levanta SemRespostaConferida."""
-    pedido = json.dumps([modelo, sistema, usuario, max_tokens], ensure_ascii=False)
-    arquivo = _dir_respostas(ato_id) / f"{hashlib.sha256(pedido.encode()).hexdigest()[:24]}.json"
+    arquivo = arquivo_resposta(ato_id, modelo, sistema, usuario, max_tokens)
     if arquivo.exists():
         d = json.loads(arquivo.read_text(encoding="utf-8"))
         return Resposta(d["texto"], d["parada"], d["uso"]), True
@@ -569,10 +578,8 @@ def corpo_sem_ementa(limpo: str) -> str:
                          if not b.lstrip().startswith("## EMENTA")).strip()
 
 
-def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
-                limite: int | None = None, so_disco: bool = False) -> tuple[list[dict], dict]:
-    """Chama o modelo parte a parte. Tudo ou nada: se uma parte falha, levanta. Com `so_disco`,
-    só usa as respostas guardadas pelo --gerar."""
+def preparar(ato: dict, texto: str, limite: int | None = None) -> tuple[list[Parte], list[dict]]:
+    """Partes do teor e prompt do sistema do ato — o que a chamada direta e o lote enviam."""
     limpo = texto_para_llm(texto)
     if not limpo:
         raise FalhaCategorizacao("texto vazio depois de tirar o HTML")
@@ -582,6 +589,14 @@ def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
     sistema = blocos_sistema(ato["tipo_ato"])
     if len(partes) > 1:
         sistema.append(bloco_sumario(limpo))
+    return partes, sistema
+
+
+def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
+                limite: int | None = None, so_disco: bool = False) -> tuple[list[dict], dict]:
+    """Chama o modelo parte a parte. Tudo ou nada: se uma parte falha, levanta. Com `so_disco`,
+    só usa as respostas guardadas pelo --gerar."""
+    partes, sistema = preparar(ato, texto, limite)
     saidas: list[dict] = []
     for parte in partes:
         saidas += _categorizar_parte(ato, parte, len(partes), sistema, chamar, modelo=modelo,
