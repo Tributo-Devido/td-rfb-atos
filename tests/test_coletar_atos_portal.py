@@ -194,6 +194,7 @@ def _executar(conn, arquivo: str) -> None:
 @pytest.fixture
 def conn(tmp_path, monkeypatch):
     monkeypatch.setenv("RFB_ATOS_DADOS", str(tmp_path))
+    monkeypatch.setattr(col, "_LEGADO_POR_LINK", None)   # o mapa do legado é por processo
     with psycopg.connect(DSN, autocommit=True) as c:
         _limpar(c)
         _executar(c, "tests/fixtures/schema_rfb_atos.sql")
@@ -344,3 +345,65 @@ def test_ato_ja_na_base_com_outra_grafia_de_orgao_nao_e_duplicado(conn):
                        run_id="c1", saida=_mudo)
     assert r["ja_existia"]
     assert _um(conn, "SELECT count(*) FROM rfb_atos.ato WHERE numero = '1911'") == (1,)
+
+
+def test_listagem_sem_numero_traz_todas_as_linhas_com_a_data():
+    todas = col.linhas_da_listagem([LISTAGEM_2002], None)
+    assert [a["idAto"] for a in todas] == [15124, 15123, 99]
+    assert todas[0]["publicacao"] == date(2002, 12, 3)
+
+
+@precisa_banco
+def test_novos_desde_uma_data_lista_so_o_que_falta_e_grava(conn):
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]      # a varredura vai de 2002 até hoje: só 2002 tem atos
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "03/12/2002", "Retificação", 15124),
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe sobre a Contribuição", 15123),
+        _linha_html("200", "SRF", "01/10/2002", "Antes da data de corte", 15000))
+    plano = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=False, run_id="n0",
+                              tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    assert [r["alvo"] for r in plano] == ["INSTRUCAO_NORMATIVA 247 (idAto 15123)",
+                                          "INSTRUCAO_NORMATIVA 247 (idAto 15124)"]
+    assert not any(p[1] == "vigente" for p in portal.pedidos if isinstance(p, tuple))
+    gravados = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True,
+                                 run_id="n1", tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    assert [r.get("ato_id") is not None for r in gravados] == [True, True]
+    # de novo: nada falta, nada é baixado
+    portal.pedidos.clear()
+    assert col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True, run_id="n2",
+                             tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo) == []
+    assert all(p[0] == "listagem" for p in portal.pedidos)
+
+
+@precisa_banco
+def test_erro_num_ato_novo_nao_para_os_outros(conn):
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe", 15123),
+        _linha_html("999", "SRF", "27/11/2002", "Sem visão no portal", 424242))
+    resultados = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True,
+                                   run_id="n3", tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    assert resultados[0].get("ato_id") and "erro" in resultados[1]
+
+
+@precisa_banco
+def test_ato_que_o_portal_recusa_406_nao_conta_como_erro(conn):
+    class Recusa(Exception):
+        response = type("R", (), {"status_code": 406})()
+
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(_linha_html("888", "SRF", "27/11/2002", "x", 88888))
+    original = portal.visao
+
+    def visao(id_portal, nome):
+        if id_portal == 88888:
+            raise Recusa()
+        return original(id_portal, nome)
+
+    portal.visao = visao
+    (r,) = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True, run_id="r406",
+                             tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    assert r["recusado"] == 406 and "erro" not in r

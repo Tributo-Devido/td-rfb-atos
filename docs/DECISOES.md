@@ -345,3 +345,113 @@ não há duplicata equivalente para remover.
 
 **O que derrubaria.** Consulta do time devolvendo várias matérias da 2.121 com o mesmo conteúdo
 no top-k — aí medir de novo com os pares acima de 0,90.
+
+---
+
+## 2026-09-24 · Rotina noturna: coleta de todos os tipos, categorização em lote com Sonnet, portão automático
+
+**Decisão (do dono).** Acompanhar todos os tipos de ato do portal; categorização com Sonnet no mínimo
+(sinal inclusive); aprovação automática por regras em vez de revisão manual; rotina na máquina do
+dono (Agendador de Tarefas). Implementado em `scripts/rotina_noturna.py` (+ `.ps1`),
+`lote_categorizacao.py` e o modo `--automatico` do `categorizar_nuvem.py`:
+- coleta de tudo o que o portal publicou desde a última publicação da base (menos 10 dias);
+- categorização pela API em lote da Anthropic (metade do preço; o enviado numa noite é gravado na
+  seguinte), só dos tipos liberados em `references/rotina_noturna.json`;
+- portão: parte sem matéria; mais de 20% das matérias fora da taxonomia ou sem solução; cobertura
+  de artigos abaixo de 80% em ato com 20+ artigos; ato estimado acima de US$ 3 (vai para revisão
+  sem chamar). Reprovado vai para `metadados.categorizacao_revisao`, com relatório, e sai da fila.
+- fila deixa de fora não vigentes (TI-7560), alterados com texto do extrator antigo (D12) e ADEs.
+
+**Cada tipo de ato só entra na categorização depois da rodada de pesquisa dele** (pedido do dono:
+"cada tipo de ato tem seu papel diferente"). Liberado hoje: `SOLUCAO_CONSULTA`.
+
+**Alternativas descartadas.** Revisão manual diária (o dono escolheu a automática); Haiku na massa
+(o dono pediu Sonnet no mínimo); chamada direta para o passivo (~US$ 520 medidos contra ~US$ 210 em
+lote com JSON compacto — opção C do dono).
+
+**O que derrubaria.** Taxa de revisão alta no primeiro lote aplicado (o portão reprovando SC boa) —
+aí as regras são recalibradas antes de liberar outro tipo.
+
+---
+
+## 2026-09-24 · Rodada de pesquisa — Solução de Consulta
+
+**Achados (banco e portal, 24/09).**
+- COSIT: 7.942 SCs, 7.398 já com matéria (93%). A fila é sobretudo DISIT (3.715) e COANA/DIANA
+  (1.439) — a categorização antiga quase não passou por elas —, 233 COSIT vinculadas (série 99.xxx,
+  que aplicam SC anterior a um consulente novo) e 136 outras COSIT.
+- O portal publica a SC DISIT e COANA — e parte das COSIT — **só pela ementa** (assunto, tese,
+  dispositivos), como sai no DOU: em 9 SCs conferidas, o texto da base é igual ao do portal. 99% da
+  fila não tem relatório nem fundamentos. Nas COSIT já categorizadas, 55% também eram só ementa.
+- COANA/DIANA são classificação fiscal de mercadorias (código NCM, RGI, Nesh): o esquema
+  `CLASSIFICACAO_FISCAL.PRODUTO` do prompt cobre (conferido na amostra: COANA 14/2015 → NCM
+  2103.90.91).
+- Nenhuma outra tabela do banco guarda categorização de SC (carf, legislacao e pgfn são bases
+  separadas). Nas SCs já categorizadas, `llm_model` diz "text-embedding-3-large": o
+  `reembed_cloud.py` antigo apagava o modelo (corrigido em 13/09).
+
+**Decisão.** Categorizar pela ementa publicada, com `ato_materia.base_analise = 'ementa'` quando o
+texto não tem relatório nem fundamentos; o modelo é avisado de que a íntegra não é publicada.
+Calibração (10 SCs, Sonnet direto): US$ 0,089 por SC, qualidade boa (uma matéria por tributo na SC
+de vários assuntos, NCM certo na COANA). Enviados em 24/09 quatro lotes com 5.569 pedidos (5.560
+SCs); 31 SCs com ementa curta demais vão para revisão sem modelo.
+
+**Pendente.** A afirmação do prompt de que SC DISIT/DIANA/COANA "vincula apenas o consulente e a
+região" é interpretação da IN RFB 2.058/2021 a conferir em fonte oficial (4-LLM); o efeito prático
+é pequeno (só preenche `eficacia_atual` vazia).
+
+---
+
+## 2026-09-24 · Rodada de pesquisa — Solução de Divergência e Solução de Consulta Interna
+
+**Achados.** SD: 370 na base, 259 com matéria; fila de 102 (61 COANA — reforma de ofício de SC
+regional de classificação de mercadorias —, 40 COSIT), todas só pela ementa, como as SCs. SCI: 250,
+206 com matéria; fila de 27 (COSIT), todas com a íntegra (média de 23 mil caracteres). O prompt de
+SC foi escrito para as três (SC, SD, SCI) e a regra de `base_analise` vale igual (SD → 'ementa',
+SCI → 'texto'). As relações de reforma/uniformização vêm do portal, não do modelo (decisão de 13/09).
+
+**Decisão.** Liberadas na rotina (`tipos_categorizar`); lote enviado em 24/09. Teto da noite: US$ 50
+(dono, 24/09). Próximos, na ordem aprovada pelo dono: IN, Parecer Normativo, ADI/ADN; por último
+Portarias.
+
+---
+
+## 2026-09-24 · Rodada de pesquisa — IN, Parecer Normativo, ADI e ADN
+
+**Achados.** Texto completo na base (são as próprias normas): IN fila 631 (mediana 2,4 mil caracteres;
+2 acima de 100 mil), PN 89 (COSIT/CST, mediana 5,9 mil), ADI 240 (mediana 1,4 mil), ADN 321 (quase
+todos dos anos 90, mediana 1,1 mil). Prompt de normativos, escrito para esses tipos. Amostra de 8
+atos (3 IN, 2 PN, 2 ADI, 1 ADN) com Sonnet direto: 8 de 8 sem erro, US$ 0,086 por ato, matérias
+corretas (ex.: IN SRF 567/2005 — SESI/SENAI; PN 11/2013 — IPI na remessa entre estabelecimentos;
+ADI 34/2004 — NCM da nafta e CIDE).
+
+**Decisão.** Liberados na rotina; lote enviado em 24/09. Falta, na ordem aprovada: Portarias (muitas
+administrativas de unidades locais — a rodada precisa separar as que tratam de tributo).
+
+---
+
+## 2026-09-24 · Revisão 4-LLM da PR #6 (antes do `aplicar` dos lotes) e ancoragem no portão
+
+**Achados que procederam** (Codex, Grok, Gemini) e correções:
+- *Ato preso sem sinal/vetor*: se o sinal ou o vetor falhavam depois de gravar as matérias, a
+  próxima tentativa via o ato "já analisado", pulava, e o lote era dado como aplicado. Agora ato com
+  matérias só completa sinal e vetor; lote com erro ou incompleto fica "baixado" e é reaplicado.
+- *Falha do lote virava chamada direta sem teto*: pedidos expirados ou com erro seriam refeitos a
+  preço cheio. O `aplicar` agora só usa as respostas em disco; o que falta fica pendente e vai no
+  próximo lote (inclusive as metades de resposta cortada no limite de tokens).
+- *Ato dividido entre lotes*: o corte a cada 1.500 pedidos podia separar partes do mesmo ato. Os
+  lotes agora são montados por ato.
+- *Teto parava a fila inteira* quando um ato não cabia (`break` → `continue`); *manifesto só depois
+  do `create`* (agora um provisório antes, que segura os atos 24 h se o processo cair no meio);
+  `aplicar` manual usa a mesma trava da rotina; revisão em massa vira alerta no resumo.
+- *Portão cego para conteúdo inventado* (Gemini): **ancoragem** — o tributo e o número das leis
+  citadas pela matéria têm de aparecer no texto do ato; mais de 20% das matérias sem âncora manda o
+  ato para revisão. Nas 36 matérias da calibração, 0 alarme falso (depois de aceitar "lucro" e
+  "preços de transferência" como sinal de IRPJ/CSLL).
+
+**Não procedeu.** Matéria gravada em dobro no reaplicar (Grok): `persistir` recusa ato que já tem
+matéria, e `UNIQUE (ato_id, ordem)` é a barreira final.
+
+**Em aberto.** Segunda leitura por modelo ("a solução contradiz o texto?", Gemini) para pegar tese
+invertida: custa uma chamada por matéria; a proposta é rodar em amostra de cada lote aplicado, como
+métrica de qualidade, e decidir com o número.
