@@ -1119,8 +1119,8 @@ NOMES_TRIBUTO = {
                           "incra", "salario-educacao", "salario educacao"),
     "SIMPLES": ("simples",),
 }
-# Regimes que, por definição, reúnem vários tributos: citá-los ancora os tributos reunidos (rodada do
-# aplicar de 24/09/2026 — ex.: retenção da IN RFB 1.234/2012 e RET-Incorporação = IRPJ, CSLL, PIS e
+# Regimes que, por definição, reúnem vários tributos: citá-los ancora os tributos reunidos (aplicar
+# de 24/09/2026 — ex.: retenção da IN RFB 1.234/2012 e RET-Incorporação = IRPJ, CSLL, PIS e
 # Cofins, mesmo sem os nomes no texto).
 REGIMES_COMPOSTOS = {
     "1.234": {"IRPJ", "CSLL", "PIS", "COFINS"},             # retenção por órgãos federais
