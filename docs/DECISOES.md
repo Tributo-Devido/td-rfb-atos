@@ -413,3 +413,17 @@ SCI → 'texto'). As relações de reforma/uniformização vêm do portal, não 
 **Decisão.** Liberadas na rotina (`tipos_categorizar`); lote enviado em 24/09. Teto da noite: US$ 50
 (dono, 24/09). Próximos, na ordem aprovada pelo dono: IN, Parecer Normativo, ADI/ADN; por último
 Portarias.
+
+---
+
+## 2026-09-24 · Rodada de pesquisa — IN, Parecer Normativo, ADI e ADN
+
+**Achados.** Texto completo na base (são as próprias normas): IN fila 631 (mediana 2,4 mil caracteres;
+2 acima de 100 mil), PN 89 (COSIT/CST, mediana 5,9 mil), ADI 240 (mediana 1,4 mil), ADN 321 (quase
+todos dos anos 90, mediana 1,1 mil). Prompt de normativos, escrito para esses tipos. Amostra de 8
+atos (3 IN, 2 PN, 2 ADI, 1 ADN) com Sonnet direto: 8 de 8 sem erro, US$ 0,086 por ato, matérias
+corretas (ex.: IN SRF 567/2005 — SESI/SENAI; PN 11/2013 — IPI na remessa entre estabelecimentos;
+ADI 34/2004 — NCM da nafta e CIDE).
+
+**Decisão.** Liberados na rotina; lote enviado em 24/09. Falta, na ordem aprovada: Portarias (muitas
+administrativas de unidades locais — a rodada precisa separar as que tratam de tributo).
