@@ -39,7 +39,7 @@ import os
 import re
 import sys
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import psycopg
@@ -126,22 +126,24 @@ def eficacia_padrao(tipo_ato: str) -> str | None:
 # Funções puras
 # ---------------------------------------------------------------------------
 
-def linhas_da_listagem(htmls: list[str], numero: str) -> list[dict]:
-    """Linhas da listagem com esse número (só dígitos): [{idAto, cols, href}]."""
+def linhas_da_listagem(htmls: list[str], numero: str | None) -> list[dict]:
+    """Linhas da listagem com esse número (só dígitos), ou todas com `numero=None`:
+    [{idAto, cols, href, publicacao}]."""
     from bs4 import BeautifulSoup
-    alvo = re.sub(r"\D", "", numero)
+    alvo = re.sub(r"\D", "", numero) if numero is not None else None
     achados = []
     for html in htmls:
         for tabela in BeautifulSoup(html, "html.parser").find_all("table", id="tabelaAtos"):
             limpa = BeautifulSoup(str(tabela).replace("<br>", "\n"), "html.parser")
             for tr in limpa.find_all("tr"):
                 cols = [c.get_text(strip=True) for c in tr.find_all("td")]
-                if len(cols) != 5 or re.sub(r"\D", "", cols[1]) != alvo:
+                if len(cols) != 5 or (alvo is not None and re.sub(r"\D", "", cols[1]) != alvo):
                     continue
                 a = tr.find("a", href=True)
                 m = re.search(r"/externa/(\d+)", a["href"]) if a else None
                 if m and all(x["idAto"] != int(m.group(1)) for x in achados):
-                    achados.append({"idAto": int(m.group(1)), "cols": cols, "href": a["href"]})
+                    achados.append({"idAto": int(m.group(1)), "cols": cols, "href": a["href"],
+                                    "publicacao": vp.data_dmy(cols[3])})
     return achados
 
 
@@ -403,45 +405,107 @@ def coletar(conn, alvo: tuple[str, str, int], portal, *, aplicar: bool, run_id: 
     if not achados:
         saida(f"[ausente] {tipo} {numero}/{ano}: não está na listagem do portal")
         return [{"alvo": f"{tipo} {numero}/{ano}", "erro": "ausente no portal"}]
+    rotulo = f"{tipo} {numero}/{ano}"
+    return [coletar_item(conn, tipo, item, portal, aplicar=aplicar, run_id=run_id, saida=saida,
+                         rotulo=rotulo) for item in achados]
+
+
+def coletar_item(conn, tipo: str, item: dict, portal, *, aplicar: bool, run_id: str,
+                 saida=print, rotulo: str | None = None) -> dict:
+    """Um ato da listagem do portal: plano ou gravação. Ato já na base é pulado."""
+    rotulo = f"{rotulo or tipo} (idAto {item['idAto']})"
+    existente = _id_por_portal(conn, item["idAto"])   # antes de baixar: não gasta o portal
+    if existente:
+        saida(f"[já na base] {rotulo}: ato {existente}")
+        return {"alvo": rotulo, "ato_id": existente, "ja_existia": True}
+    vigente = portal.visao(item["idAto"], "vigente")
+    relacional = portal.visao(item["idAto"], "relacional") or {}
+    if not vigente:
+        saida(f"[erro] {rotulo}: visão vigente indisponível")
+        return {"alvo": rotulo, "erro": "visão vigente indisponível"}
+    linha = linha_ato(tipo, item, vigente)
+    existente = ja_na_base(conn, linha)
+    if existente:
+        saida(f"[já na base] {rotulo}: ato {existente}")
+        return {"alvo": rotulo, "ato_id": existente, "ja_existia": True}
+    revogadores = {imp["idAto"] for imp in relacional.get("impactosPoloAtivo") or []
+                   if imp.get("sigla") == "REV" and imp.get("idAto")}
+    inicio = {}
+    if not vigente.get("vigente"):
+        for rv in revogadores:
+            v = portal.visao(rv, "vigente")
+            inicio[rv] = vp.data_iso(v.get("dataVigenciaInicio")) if v else None
+    texto = vp.texto_da_visao(vigente)
+    fim, origem_fim = (fim_vigencia(relacional, inicio) if not vigente.get("vigente")
+                       else (None, None))
+    saida(f"[plano] {rotulo}: {linha['identificador']} {linha['emissor']} pub "
+          f"{linha['data_publicacao']} | {vp.status_vigencia(vigente)} | {len(texto):,} "
+          f"caracteres | anexo PDF: {vp.corpo_em_pdf(vigente)} | "
+          f"{len(arestas_do_portal(linha['id_portal'], None, relacional))} relações | fim: "
+          f"{_fim_legivel(fim, origem_fim)}")
+    if not aplicar:
+        return {"alvo": rotulo, "plano": True, "caracteres": len(texto)}
+    original = portal.visao(item["idAto"], "original")
+    resumo = gravar_ato(conn, linha, vigente, original, relacional, inicio, run_id=run_id,
+                        origem=f"{cap.API}/{item['idAto']}/visao/vigente")
+    saida(f"[ok] {rotulo}: {resumo}")
+    return {"alvo": rotulo, **resumo}
+
+
+def tipos_do_portal() -> list[str]:
+    """Todos os tipos de ato com código na listagem do SIJUT (taxonomia.json)."""
+    tipos = json.loads(TAXONOMIA.read_text(encoding="utf-8"))["tipos_ato"]["lista"]
+    return [t["codigo"] for t in tipos
+            if t.get("sijut_value") is not None and t.get("ativo", True)]
+
+
+def novos_no_portal(conn, portal, *, desde: date, ate: date | None = None,
+                    tipos: list[str] | None = None, saida=print) -> list[tuple[str, dict]]:
+    """(tipo, linha da listagem) dos atos publicados no portal depois de `desde` que não estão na
+    base (pelo idAto). Lê a listagem de cada tipo nos anos entre `desde` e `ate`, sem o filtro de
+    vigentes; não baixa visão nenhuma."""
+    ate = ate or date.today()
+    novos = []
+    for tipo in tipos or tipos_do_portal():
+        valor = sijut_value(tipo)
+        for ano in range(desde.year, ate.year + 1):
+            linhas = [x for x in linhas_da_listagem(portal.listagem(valor, ano), None)
+                      if x["publicacao"] and x["publicacao"] > desde]
+            faltam = [x for x in linhas if not _id_por_portal(conn, x["idAto"])]
+            if linhas:
+                saida(f"[listagem] {tipo} {ano}: {len(linhas)} publicados desde {desde}, "
+                      f"{len(faltam)} fora da base")
+            novos += [(tipo, x) for x in faltam]
+    return novos
+
+
+def coletar_novos(conn, portal, *, desde: date, aplicar: bool, run_id: str,
+                  tipos: list[str] | None = None, limite: int | None = None,
+                  saida=print) -> list[dict]:
+    """Coleta os atos publicados desde `desde` que faltam na base, do mais antigo ao mais novo. Um
+    ato com erro não para os outros; sem `aplicar`, só lista (não baixa as visões)."""
+    novos = novos_no_portal(conn, portal, desde=desde, tipos=tipos, saida=saida)
+    novos.sort(key=lambda x: (x[1]["publicacao"], x[1]["idAto"]))
+    if limite:
+        novos = novos[:limite]
+    if not aplicar:
+        return [{"alvo": f"{t} {x['cols'][1]} (idAto {x['idAto']})", "plano": True}
+                for t, x in novos]
     resultados = []
-    for item in achados:
-        rotulo = f"{tipo} {numero}/{ano} (idAto {item['idAto']})"
-        vigente = portal.visao(item["idAto"], "vigente")
-        relacional = portal.visao(item["idAto"], "relacional") or {}
-        if not vigente:
-            saida(f"[erro] {rotulo}: visão vigente indisponível")
-            resultados.append({"alvo": rotulo, "erro": "visão vigente indisponível"})
-            continue
-        linha = linha_ato(tipo, item, vigente)
-        existente = ja_na_base(conn, linha)
-        if existente:
-            saida(f"[já na base] {rotulo}: ato {existente}")
-            resultados.append({"alvo": rotulo, "ato_id": existente, "ja_existia": True})
-            continue
-        revogadores = {imp["idAto"] for imp in relacional.get("impactosPoloAtivo") or []
-                       if imp.get("sigla") == "REV" and imp.get("idAto")}
-        inicio = {}
-        if not vigente.get("vigente"):
-            for rv in revogadores:
-                v = portal.visao(rv, "vigente")
-                inicio[rv] = vp.data_iso(v.get("dataVigenciaInicio")) if v else None
-        texto = vp.texto_da_visao(vigente)
-        fim, origem_fim = (fim_vigencia(relacional, inicio) if not vigente.get("vigente")
-                           else (None, None))
-        saida(f"[plano] {rotulo}: {linha['identificador']} {linha['emissor']} pub "
-              f"{linha['data_publicacao']} | {vp.status_vigencia(vigente)} | {len(texto):,} "
-              f"caracteres | anexo PDF: {vp.corpo_em_pdf(vigente)} | "
-              f"{len(arestas_do_portal(linha['id_portal'], None, relacional))} relações | fim: "
-              f"{_fim_legivel(fim, origem_fim)}")
-        if not aplicar:
-            resultados.append({"alvo": rotulo, "plano": True, "caracteres": len(texto)})
-            continue
-        original = portal.visao(item["idAto"], "original")
-        resumo = gravar_ato(conn, linha, vigente, original, relacional, inicio, run_id=run_id,
-                            origem=f"{cap.API}/{item['idAto']}/visao/vigente")
-        saida(f"[ok] {rotulo}: {resumo}")
-        resultados.append({"alvo": rotulo, **resumo})
+    for tipo, item in novos:
+        try:
+            resultados.append(coletar_item(conn, tipo, item, portal, aplicar=True,
+                                           run_id=run_id, saida=saida,
+                                           rotulo=f"{tipo} {item['cols'][1]}"))
+        except Exception as e:
+            saida(f"[erro] {tipo} idAto {item['idAto']}: {type(e).__name__}: {e}")
+            resultados.append({"alvo": f"{tipo} idAto {item['idAto']}",
+                               "erro": f"{type(e).__name__}: {e}"})
     return resultados
+
+
+def ultima_publicacao(conn) -> date | None:
+    return conn.execute("SELECT max(data_publicacao) FROM rfb_atos.ato").fetchone()[0]
 
 
 # ---------------------------------------------------------------------------
@@ -467,19 +531,28 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--ato", action="append", help="TIPO:NUMERO/ANO (repetível)")
     p.add_argument("--lista", help="CSV com tipo_ato;numero;ano")
+    p.add_argument("--novos-desde", help="AAAA-MM-DD: tudo o que o portal publicou depois dessa "
+                   "data e falta na base; 'auto' = última publicação da base menos 10 dias")
+    p.add_argument("--tipos", nargs="+", help="com --novos-desde (padrão: todos os tipos)")
+    p.add_argument("--limit", type=int, help="com --novos-desde: no máximo N atos")
     p.add_argument("--aplicar", action="store_true", help="grava (padrão: só o plano)")
     p.add_argument("--run-id")
     p.add_argument("--dsn")
     args = p.parse_args()
     alvos = ler_alvos(args)
-    if not alvos:
-        sys.exit("[erro] informe --ato ou --lista")
+    if not alvos and not args.novos_desde:
+        sys.exit("[erro] informe --ato, --lista ou --novos-desde")
     run_id = args.run_id or f"coletar-{time.strftime('%Y%m%dT%H%M%S')}"
     portal = Portal()
     resultados = []
     with psycopg.connect(cap._dsn(args.dsn, args.aplicar), autocommit=True) as conn:
         if args.aplicar:
             cap.exigir_schema(conn)
+        if args.novos_desde:
+            desde = (ultima_publicacao(conn) - timedelta(days=10) if args.novos_desde == "auto"
+                     else date.fromisoformat(args.novos_desde))
+            resultados += coletar_novos(conn, portal, desde=desde, aplicar=args.aplicar,
+                                        run_id=run_id, tipos=args.tipos, limite=args.limit)
         for alvo in alvos:
             try:
                 resultados += coletar(conn, alvo, portal, aplicar=args.aplicar, run_id=run_id)
