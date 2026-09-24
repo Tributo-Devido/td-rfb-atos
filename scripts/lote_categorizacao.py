@@ -288,13 +288,16 @@ def main() -> None:
     trava = rn.travar(rn._pasta())
     if trava is None:
         sys.exit("[lote] a rotina noturna (ou outro aplicar) está rodando: tente depois")
-    erros = 0
-    for batch_id in alvos:
-        r = aplicar(batch_id, cliente, conectar=lambda: psycopg.connect(dsn, autocommit=True),
-                    chamar=chamar, paralelo=args.paralelo, teto_usd=args.teto_usd)
-        erros += sum(1 for x in r if x.get("erro"))
-    trava.unlink(missing_ok=True)
-    sys.exit(1 if erros else 0)
+    problemas = 0
+    try:
+        for batch_id in alvos:
+            r = aplicar(batch_id, cliente, conectar=lambda: psycopg.connect(dsn, autocommit=True),
+                        chamar=chamar, paralelo=args.paralelo, teto_usd=args.teto_usd)
+            # erro ou sinal/vetor faltando: saída 1 (o lote fica "baixado" para reaplicar)
+            problemas += sum(1 for x in r if cn.estado_do_resultado(x) in ("erro", "incompleto"))
+    finally:
+        trava.unlink(missing_ok=True)   # a trava nunca fica presa se o aplicar cair no meio
+    sys.exit(1 if problemas else 0)
 
 
 if __name__ == "__main__":
