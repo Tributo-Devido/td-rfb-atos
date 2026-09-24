@@ -399,3 +399,17 @@ SCs); 31 SCs com ementa curta demais vão para revisão sem modelo.
 **Pendente.** A afirmação do prompt de que SC DISIT/DIANA/COANA "vincula apenas o consulente e a
 região" é interpretação da IN RFB 2.058/2021 a conferir em fonte oficial (4-LLM); o efeito prático
 é pequeno (só preenche `eficacia_atual` vazia).
+
+---
+
+## 2026-09-24 · Rodada de pesquisa — Solução de Divergência e Solução de Consulta Interna
+
+**Achados.** SD: 370 na base, 259 com matéria; fila de 102 (61 COANA — reforma de ofício de SC
+regional de classificação de mercadorias —, 40 COSIT), todas só pela ementa, como as SCs. SCI: 250,
+206 com matéria; fila de 27 (COSIT), todas com a íntegra (média de 23 mil caracteres). O prompt de
+SC foi escrito para as três (SC, SD, SCI) e a regra de `base_analise` vale igual (SD → 'ementa',
+SCI → 'texto'). As relações de reforma/uniformização vêm do portal, não do modelo (decisão de 13/09).
+
+**Decisão.** Liberadas na rotina (`tipos_categorizar`); lote enviado em 24/09. Teto da noite: US$ 50
+(dono, 24/09). Próximos, na ordem aprovada pelo dono: IN, Parecer Normativo, ADI/ADN; por último
+Portarias.
