@@ -107,7 +107,7 @@ CADEIA_PISCOFINS = {("247", 2002), ("457", 2004), ("660", 2006), ("1717", 2017),
 LIMITE_PARTE = 25_000      # caracteres de teor por chamada
 MINIMO_PARTE = 4_000       # parte cortada no limite de tokens só é dividida se tiver 2x isto
 MAX_TOKENS = 32_000        # a chamada é por streaming (o prod_runner do CARF usa o mesmo)
-MAX_TOKENS_SINAL = 20      # o sinal é uma palavra
+MAX_TOKENS_SINAL = 1024    # o sinal é uma palavra, mas o Sonnet 5 pensa antes: com 20 saía vazio
 FONTE_EMBEDDING = "openai_text_embedding_3_large_3072"
 
 # Só para o plano (--executar mostra o uso real). Preço de referência por milhão de tokens
