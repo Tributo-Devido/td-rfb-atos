@@ -40,6 +40,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import unicodedata
 from collections import Counter
@@ -75,8 +76,11 @@ SCHEMAS_DIR = REFS / "schemas_metadata_tematico"
 TIPOS_SC = {"SOLUCAO_CONSULTA", "SOLUCAO_DIVERGENCIA", "SOLUCAO_CONSULTA_INTERNA"}
 
 MODELO_CADEIA = "claude-sonnet-5"
-MODELO_MASSA = "claude-haiku-4-5-20251001"
-MODELO_SINAL = "claude-haiku-4-5-20251001"
+MODELO_MASSA = "claude-haiku-4-5-20251001"   # o que categorizou a base antiga
+# Decisão do dono em 24/09/2026: categorização com Sonnet no mínimo — em todos os tipos, e no
+# sinal também. O Haiku fica só como referência do legado.
+MODELO_PADRAO = MODELO_CADEIA
+MODELO_SINAL = MODELO_CADEIA
 # Só o Haiku 4.5 recebe temperature=0: o Sonnet 5 recusa valor diferente do padrão (HTTP 400; guia
 # de migração do Sonnet 5, apontado na revisão 4-LLM, Codex v4). O td-analise-piscofins já chama o
 # claude-sonnet-5 sem o parâmetro (scripts/carf-categorizacao/prod_runner.py).
@@ -85,9 +89,12 @@ MODELOS_COM_TEMPERATURA = {MODELO_MASSA}
 CADEIA_PISCOFINS = {("247", 2002), ("457", 2004), ("660", 2006), ("1717", 2017),
                     ("1911", 2019), ("2121", 2022)}
 
-LIMITE_PARTE = 60_000      # caracteres de teor por chamada (~17 mil tokens)
+# Medido na IN 2.121 (13/09/2026): o Sonnet devolve ~1 token por caractere de teor. Com 60 mil
+# caracteres por parte, 44 de 147 respostas estouraram o teto e foram pagas e descartadas. Com
+# 25 mil e teto de 32 mil tokens, sobra folga.
+LIMITE_PARTE = 25_000      # caracteres de teor por chamada
 MINIMO_PARTE = 4_000       # parte cortada no limite de tokens só é dividida se tiver 2x isto
-MAX_TOKENS = 16_000        # abaixo do teto em que o SDK exige streaming sem aviso
+MAX_TOKENS = 32_000        # a chamada é por streaming (o prod_runner do CARF usa o mesmo)
 MAX_TOKENS_SINAL = 20      # o sinal é uma palavra
 FONTE_EMBEDDING = "openai_text_embedding_3_large_3072"
 
@@ -95,7 +102,10 @@ FONTE_EMBEDDING = "openai_text_embedding_3_large_3072"
 # (entrada, saída); conferir na fatura. Cache: escrever custa 1,25x a entrada, ler 0,1x.
 PRECO_REFERENCIA = {MODELO_CADEIA: (3.0, 15.0), MODELO_MASSA: (1.0, 5.0)}
 CARACTERES_POR_TOKEN = 3.5
-SAIDA_POR_PARTE = 3_000
+SAIDA_POR_CARACTERE = 1.0  # tokens de resposta por caractere de teor (IN 2.121)
+SAIDA_MINIMA = 1_500       # por chamada: ato curto ainda devolve JSON com metadados
+CUSTO_MAX_ATO = 3.0        # US$: acima disso o modo automático não chama; vai para revisão
+MINIMO_CORPO = 200         # caracteres de corpo além da ementa para categorizar
 
 REGRAS_SAIDA = (
     "REGRAS DE OUTPUT:\n"
@@ -302,10 +312,8 @@ def bloco_sumario(texto: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def escolher_modelo(tipo_ato: str | None, numero: str | None, ano: int | None) -> str:
-    chave = (re.sub(r"\D", "", str(numero or "")), ano)
-    if tipo_ato == "INSTRUCAO_NORMATIVA" and chave in CADEIA_PISCOFINS:
-        return MODELO_CADEIA
-    return MODELO_MASSA
+    """Sonnet em tudo (decisão do dono em 24/09/2026; antes, só na cadeia de PIS/COFINS)."""
+    return MODELO_PADRAO
 
 
 def blocos_sistema(tipo_ato: str) -> list[dict]:
@@ -386,8 +394,13 @@ def chamador_anthropic(cliente=None):
 @dataclass
 class Uso:
     por_modelo: dict = field(default_factory=dict)
+    _trava: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def somar(self, modelo: str, uso: dict, do_disco: bool) -> None:
+        with self._trava:
+            self._somar(modelo, uso, do_disco)
+
+    def _somar(self, modelo: str, uso: dict, do_disco: bool) -> None:
         d = self.por_modelo.setdefault(modelo, {"chamadas": 0, "do_disco": 0, "entrada": 0,
                                                 "saida": 0, "cache_criado": 0, "cache_lido": 0})
         if do_disco:
@@ -534,6 +547,12 @@ def juntar(saidas: list[dict]) -> tuple[list[dict], dict]:
     return materias, meta
 
 
+def corpo_sem_ementa(limpo: str) -> str:
+    """O texto sem os blocos de ementa (marcados '## EMENTA' pelo carregador e pelo extrator)."""
+    return "\n\n".join(b for b in limpo.split("\n\n")
+                         if not b.lstrip().startswith("## EMENTA")).strip()
+
+
 def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
                 limite: int | None = None, so_disco: bool = False) -> tuple[list[dict], dict]:
     """Chama o modelo parte a parte. Tudo ou nada: se uma parte falha, levanta. Com `so_disco`,
@@ -541,6 +560,8 @@ def categorizar(ato: dict, texto: str, chamar, *, modelo: str, uso: Uso,
     limpo = texto_para_llm(texto)
     if not limpo:
         raise FalhaCategorizacao("texto vazio depois de tirar o HTML")
+    if len(corpo_sem_ementa(limpo)) < MINIMO_CORPO:
+        raise FalhaCategorizacao("só a ementa está em texto (o corpo deve estar em anexo PDF)")
     partes = particionar(limpo, limite)
     sistema = blocos_sistema(ato["tipo_ato"])
     if len(partes) > 1:
@@ -831,21 +852,37 @@ def vetorizar(conn, ids: list[int], *, embed=None) -> int:
 SQL_ATOS = (
     "SELECT a.id, a.tipo_ato, a.numero, a.ano, a.emissor, a.data_publicacao::text "
     "AS data_publicacao, a.ementa, a.content_disponivel, a.analise_completa, c.texto_completo, "
+    "a.status_vigencia, c.fonte_extracao, "
     "(SELECT count(*) FROM rfb_atos.ato_materia m WHERE m.ato_id = a.id) AS n_materias "
     "FROM rfb_atos.ato a LEFT JOIN rfb_atos.ato_content c ON c.ato_id = a.id")
 
 
+# Fila de pendentes: com texto, sem análise e sem matéria. Fica de fora, de propósito:
+#   - ato não vigente: matéria e vetor só depois do filtro de vigência no td-analise-core (TI-7560);
+#   - ato alterado com texto do extrator antigo: o texto mistura redações (D12 do plano);
+#   - ato que o modo automático mandou para revisão (metadados.categorizacao_revisao).
+FILA_PENDENTES = (
+    "a.content_disponivel AND NOT a.analise_completa AND length(btrim(c.texto_completo)) > 0 "
+    "AND NOT EXISTS (SELECT 1 FROM rfb_atos.ato_materia m WHERE m.ato_id = a.id) "
+    "AND a.status_vigencia IS DISTINCT FROM 'nao_vigente' "
+    "AND NOT (COALESCE(a.status_vigencia, '') = 'vigente_alterado' "
+    "         AND c.fonte_extracao IS DISTINCT FROM 'json_portal') "
+    "AND NOT (COALESCE(a.metadados, '{}'::jsonb) ? 'categorizacao_revisao')")
+
+
 def carregar_atos(conn, *, ids: list[int] | None = None, pendentes: bool = False,
-                  limit: int | None = None) -> list[dict]:
+                  limit: int | None = None, tipos: list[str] | None = None,
+                  excluir_tipos: list[str] | None = None) -> list[dict]:
     with conn.cursor(row_factory=dict_row) as cur:
         if ids:
             cur.execute(f"{SQL_ATOS} WHERE a.id = ANY(%s) ORDER BY a.id", (ids,))
         elif pendentes:
             cur.execute(
-                f"{SQL_ATOS} WHERE a.content_disponivel AND NOT a.analise_completa "
-                "AND length(btrim(c.texto_completo)) > 0 "
-                "AND NOT EXISTS (SELECT 1 FROM rfb_atos.ato_materia m WHERE m.ato_id = a.id) "
-                "ORDER BY a.data_publicacao DESC NULLS LAST, a.id LIMIT %s", (limit,))
+                f"{SQL_ATOS} WHERE {FILA_PENDENTES} "
+                "AND (%(tipos)s::text[] IS NULL OR a.tipo_ato = ANY(%(tipos)s::text[])) "
+                "AND (%(fora)s::text[] IS NULL OR NOT a.tipo_ato = ANY(%(fora)s::text[])) "
+                "ORDER BY a.data_publicacao DESC NULLS LAST, a.id LIMIT %(limite)s",
+                {"tipos": tipos, "fora": excluir_tipos, "limite": limit})
         else:
             return []
         return cur.fetchall()
@@ -1011,6 +1048,115 @@ def gerar(atos: list[dict], chamar, *, run_id: str, uso: Uso, modelo: str | None
     return resultados
 
 
+def portao(resumo: dict) -> list[str]:
+    """Regras do modo automático (aprovadas pelo dono em 24/09/2026). Lista vazia = grava; senão o
+    ato vai para revisão com o relatório pronto."""
+    motivos = []
+    n = resumo["materias"] or 0
+    if resumo.get("partes_sem_materia"):
+        motivos.append(f"partes sem matéria: {', '.join(resumo['partes_sem_materia'])}")
+    if n and resumo["tema_fora_da_taxonomia"] / n > 0.2:
+        motivos.append(f"{resumo['tema_fora_da_taxonomia']} de {n} matérias fora da taxonomia")
+    if n and resumo["sem_solucao"] / n > 0.2:
+        motivos.append(f"{resumo['sem_solucao']} de {n} matérias sem solução")
+    if resumo["artigos_no_texto"] >= 20 and (resumo["cobertura_artigos"] or 0) < 0.8:
+        motivos.append(f"cobertura de artigos {resumo['cobertura_artigos']:.0%} (mínimo 80%)")
+    return motivos
+
+
+def marcar_revisao(conn, ato_id: int, run_id: str, motivos: list[str],
+                   relatorio_md: Path | None = None) -> None:
+    """Tira o ato da fila automática (metadados.categorizacao_revisao), com log."""
+    marca = {"run_id": run_id, "motivos": motivos, "em": time.strftime("%Y-%m-%dT%H:%M:%S"),
+             "relatorio": str(relatorio_md) if relatorio_md else None}
+    with conn.transaction():
+        conn.execute("UPDATE rfb_atos.ato SET metadados = COALESCE(metadados, '{}'::jsonb) || %s, "
+                     "atualizado_em = now() WHERE id = %s",
+                     (Jsonb({"categorizacao_revisao": marca}), ato_id))
+        conn.execute("INSERT INTO rfb_atos.ato_mudanca (run_id, ato_id, tabela, campo, antes, "
+                     "depois) VALUES (%s, %s, 'ato', 'metadados.categorizacao_revisao', NULL, %s)",
+                     (run_id, ato_id, Jsonb(marca)))
+
+
+def _registrar_rodada(run_id: str, linha: dict) -> None:
+    pasta = Path(os.environ.get("RFB_ATOS_DADOS", r"C:\td-rfb-atos-dados")) / "categorizacao"
+    pasta = pasta / "rodadas"
+    pasta.mkdir(parents=True, exist_ok=True)
+    with (pasta / f"{run_id}.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(linha, ensure_ascii=False, default=str) + "\n")
+
+
+def automatico_um(conn, ato: dict, chamar, *, run_id: str, uso: Uso, modelo: str,
+                  embed=None, limite: int | None = None,
+                  custo_max_ato: float | None = CUSTO_MAX_ATO) -> dict:
+    """Um ato do modo automático: gera, passa pelo portão e grava — ou manda para revisão."""
+    rotulo = {"ato_id": ato["id"], "tipo": ato["tipo_ato"], "numero": ato["numero"],
+              "ano": ato["ano"]}
+    estimado = estimar(ato, modelo)["custo"]
+    if custo_max_ato is not None and estimado > custo_max_ato:
+        motivo = f"ato grande: ~US$ {estimado:.2f} (teto por ato US$ {custo_max_ato:.2f})"
+        marcar_revisao(conn, ato["id"], run_id, [motivo])
+        return {**rotulo, "revisar": [motivo]}
+    materias, meta = categorizar(ato, ato["texto_completo"], chamar, modelo=modelo, uso=uso,
+                                 limite=limite)
+    norma = norma_do_ato(ato)
+    linhas = [linha_materia(m, i, norma) for i, m in enumerate(materias, 1)]
+    rel = relatorio(ato, materias, linhas, meta, modelo)
+    motivos = portao(rel["resumo"])
+    if motivos:
+        caminho = escrever_relatorio(ato, run_id, rel)
+        marcar_revisao(conn, ato["id"], run_id, motivos, caminho)
+        return {**rotulo, "revisar": motivos, "relatorio": str(caminho)}
+    meta["texto_sha256"] = _sha256(ato["texto_completo"])
+    ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id)
+    sinais = classificar_sinais(conn, ato["id"], ids, chamar, uso=uso)
+    vetores = vetorizar(conn, ids, embed=embed)
+    sem_sinal, sem_vetor = conn.execute(
+        "SELECT count(*) FILTER (WHERE sinal IS NULL), count(*) FILTER (WHERE embedding IS NULL) "
+        "FROM rfb_atos.ato_materia WHERE id = ANY(%s)", (ids,)).fetchone()
+    return {**rotulo, "materias": len(ids), "partes": meta["partes"], "sinal": sinais,
+            "vetores": vetores, "sem_sinal": sem_sinal, "sem_vetor": sem_vetor,
+            "cobertura_artigos": rel["resumo"]["cobertura_artigos"]}
+
+
+def automatico(atos: list[dict], chamar, *, conectar, run_id: str, uso: Uso,
+               modelo: str | None = None, embed=None, paralelo: int = 4,
+               teto_usd: float | None = None, custo_max_ato: float | None = CUSTO_MAX_ATO,
+               limite: int | None = None, saida=print) -> list[dict]:
+    """Modo automático (rotina noturna): cada ato em paralelo, com conexão própria. Para de começar
+    atos novos quando o gasto passa do teto. Cada resultado vai para
+    RFB_ATOS_DADOS/categorizacao/rodadas/<run_id>.jsonl."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def um(ato: dict) -> dict:
+        if teto_usd is not None and uso.custo() >= teto_usd:
+            return {"ato_id": ato["id"], "pulado": "teto de gasto da rodada"}
+        escolhido = modelo or escolher_modelo(ato["tipo_ato"], ato["numero"], ato["ano"])
+        try:
+            with conectar() as conn:
+                r = automatico_um(conn, ato, chamar, run_id=run_id, uso=uso, modelo=escolhido,
+                                  embed=embed, limite=limite, custo_max_ato=custo_max_ato)
+        except AtoInapto as e:              # mudou de estado no meio (outra rodada): nada a fazer
+            r = {"ato_id": ato["id"], "pulado": str(e)}
+        except FalhaCategorizacao as e:     # só ementa, resposta inválida: sai da fila automática
+            with conectar() as conn:
+                marcar_revisao(conn, ato["id"], run_id, [str(e)])
+            r = {"ato_id": ato["id"], "revisar": [str(e)]}
+        except Exception as e:              # rede, API, banco: tenta de novo na próxima rodada
+            r = {"ato_id": ato["id"], "erro": f"{type(e).__name__}: {e}", "tipo_erro": "inesperado"}
+        _registrar_rodada(run_id, {**r, "custo_acumulado": round(uso.custo(), 4)})
+        estado = ("revisar" if r.get("revisar") else "erro" if r.get("erro")
+                  else "pulado" if r.get("pulado") else "ok")
+        saida(f"[{estado}] ato {ato['id']} ({ato['tipo_ato']} {ato['numero']}/{ato['ano']}) "
+              f"| gasto ~US$ {uso.custo():.2f} | "
+              + json.dumps({k: v for k, v in r.items() if k not in ("ato_id",)},
+                           ensure_ascii=False, default=str)[:300])
+        return r
+
+    with ThreadPoolExecutor(max_workers=max(1, paralelo)) as pool:
+        return list(pool.map(um, atos))
+
+
 PERMISSOES = (("rfb_atos.ato", "UPDATE"), ("rfb_atos.ato_content", "UPDATE"),
               ("rfb_atos.ato_materia", "INSERT"), ("rfb_atos.ato_materia", "UPDATE"),
               ("rfb_atos.materia_tributo", "INSERT"), ("rfb_atos.materia_dispositivo", "INSERT"),
@@ -1052,11 +1198,11 @@ def estimar(ato: dict, modelo: str) -> dict:
     blocos = blocos_sistema(ato["tipo_ato"]) + ([bloco_sumario(limpo)] if partes > 1 else [])
     sistema = sum(len(b["text"]) for b in blocos) / CARACTERES_POR_TOKEN
     entrada = len(limpo) / CARACTERES_POR_TOKEN + 300 * partes
-    saida = SAIDA_POR_PARTE * partes
+    saida = max(SAIDA_MINIMA * partes, SAIDA_POR_CARACTERE * len(limpo))
     p_in, p_out = PRECO_REFERENCIA.get(modelo, (0.0, 0.0))
     custo = (entrada + 1.25 * sistema + 0.1 * sistema * max(0, partes - 1)) * p_in / 1e6
     return {"caracteres": len(limpo), "partes": partes, "entrada": int(entrada + sistema * partes),
-            "saida": saida, "custo": custo + saida * p_out / 1e6}
+            "saida": int(saida), "custo": custo + saida * p_out / 1e6}
 
 
 def _mil(n: float) -> str:
@@ -1091,13 +1237,21 @@ def main() -> None:
     alvo.add_argument("--pendentes", action="store_true",
                       help="com texto, sem analise_completa e sem matéria")
     p.add_argument("--limit", type=int, default=20, help="com --pendentes (padrão 20)")
-    p.add_argument("--modelo", help=f"força o modelo (padrão: {MODELO_CADEIA} na cadeia de "
-                                    f"PIS/COFINS, {MODELO_MASSA} no resto)")
+    p.add_argument("--tipos", nargs="+", help="com --pendentes: só estes tipos de ato")
+    p.add_argument("--excluir-tipos", nargs="+", help="com --pendentes: fora estes tipos")
+    p.add_argument("--modelo", help=f"força o modelo (padrão: {MODELO_PADRAO})")
     modo = p.add_mutually_exclusive_group()
     modo.add_argument("--gerar", action="store_true",
                       help="chama o modelo e escreve o relatório para conferir; não grava")
     modo.add_argument("--executar", action="store_true",
                       help="grava como rfb_writer só o que o --gerar mostrou")
+    modo.add_argument("--automatico", action="store_true",
+                      help="gera, passa pelo portão de qualidade e grava; o que reprovar vai "
+                           "para revisão (rotina noturna)")
+    p.add_argument("--paralelo", type=int, default=4, help="com --automatico: atos simultâneos")
+    p.add_argument("--teto-usd", type=float, help="com --automatico: gasto máximo da rodada")
+    p.add_argument("--custo-max-ato", type=float, default=CUSTO_MAX_ATO,
+                   help="com --automatico: ato estimado acima disso vai para revisão sem chamar")
     p.add_argument("--sem-sinal", action="store_true")
     p.add_argument("--sem-vetor", action="store_true")
     p.add_argument("--run-id")
@@ -1105,12 +1259,17 @@ def main() -> None:
     args = p.parse_args()
     run_id = args.run_id or f"categorizar-{time.strftime('%Y%m%dT%H%M%S')}"
 
-    with psycopg.connect(_dsn(args.dsn, args.executar), autocommit=True) as conn:
-        atos = carregar_atos(conn, ids=args.ato, pendentes=args.pendentes, limit=args.limit)
+    grava = args.executar or args.automatico
+    dsn = _dsn(args.dsn, grava)
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        atos = carregar_atos(conn, ids=args.ato, pendentes=args.pendentes, limit=args.limit,
+                             tipos=args.tipos, excluir_tipos=args.excluir_tipos)
         faltando = sorted(set(args.ato or []) - {a["id"] for a in atos})
         for ato_id in faltando:
             print(f"ato {ato_id}: não existe")
         custo_total = 0.0
+        detalhar = len(atos) <= 30
+        por_tipo: dict[str, list] = {}
         for a in atos:
             modelo = args.modelo or escolher_modelo(a["tipo_ato"], a["numero"], a["ano"])
             rotulo = f"ato {a['id']} ({a['tipo_ato']} {a['numero']}/{a['ano']})"
@@ -1122,10 +1281,18 @@ def main() -> None:
                 continue
             e = estimar(a, modelo)
             custo_total += e["custo"]
+            t = por_tipo.setdefault(a["tipo_ato"], [0, 0, 0.0])
+            t[0] += 1
+            t[1] += e["caracteres"]
+            t[2] += e["custo"]
+            if not detalhar:
+                continue
             print(f"{rotulo}: {modelo} | {_mil(e['caracteres'])} caracteres sem HTML | "
                   f"{e['partes']} partes | ~{_mil(e['entrada'])} tokens de entrada, "
                   f"~{_mil(e['saida'])} de saída | ~US$ {e['custo']:.2f}")
-        if not (args.gerar or args.executar):
+        for tipo, (n, ch, cu) in sorted(por_tipo.items(), key=lambda x: -x[1][2]):
+            print(f"  {tipo:<36} {n:>6} atos | {_mil(ch)} caracteres | ~US$ {cu:,.2f}")
+        if not (args.gerar or args.executar or args.automatico):
             print(f"\ncusto estimado das matérias: ~US$ {custo_total:.2f} (preço de referência; o "
                   "real sai no fim)\n(plano: nada chamado nem gravado. --gerar chama o modelo e "
                   "escreve o relatório para conferir, sem gravar; --executar grava como "
@@ -1134,7 +1301,23 @@ def main() -> None:
             sys.exit(1 if faltando else 0)
 
         uso = Uso()
-        if args.gerar:
+        if args.automatico:
+            exigir_schema(conn)
+            try:
+                exigir_permissoes(conn)
+            except SemPermissao as e:
+                sys.exit(f"[erro] {e}")
+            resultados = automatico(
+                atos, chamador_anthropic(), conectar=lambda: psycopg.connect(dsn, autocommit=True),
+                run_id=run_id, uso=uso, modelo=args.modelo, paralelo=args.paralelo,
+                teto_usd=args.teto_usd, custo_max_ato=args.custo_max_ato)
+            contagem: dict[str, int] = {}
+            for r in resultados:
+                e = ("revisar" if r.get("revisar") else "erro" if r.get("erro")
+                     else "pulado" if r.get("pulado") else "gravado")
+                contagem[e] = contagem.get(e, 0) + 1
+            print(f"\nrodada {run_id}: {contagem}")
+        elif args.gerar:
             resultados = gerar(atos, chamador_anthropic(), run_id=run_id, uso=uso,
                                modelo=args.modelo)
         else:
@@ -1149,8 +1332,8 @@ def main() -> None:
         for modelo, d in uso.por_modelo.items():
             print(f"uso {modelo}: {d}")
         print(f"custo das chamadas (preço de referência): ~US$ {uso.custo():.2f}")
-        codigo = codigo_saida(resultados, sinal=not args.sem_sinal and args.executar,
-                              vetor=not args.sem_vetor and args.executar)
+        codigo = codigo_saida(resultados, sinal=not args.sem_sinal and grava,
+                              vetor=not args.sem_vetor and grava)
         if faltando:
             codigo = 1
         sem_erro = sum(1 for r in resultados if not r.get("erro"))

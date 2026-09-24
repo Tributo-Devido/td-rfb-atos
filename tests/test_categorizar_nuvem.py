@@ -21,6 +21,8 @@ DSN = os.environ.get("PGTEST_DSN")
 precisa_banco = pytest.mark.skipif(not DSN, reason="defina PGTEST_DSN (Postgres descartável)")
 ATO = 900101
 REFERENCIA_IN = "Instrução Normativa RFB nº 2.121/2022"
+# ato de uma parte só, com corpo além da ementa (abaixo de MINIMO_CORPO o ato não é categorizado)
+CURTO = "Art. 1º " + "Texto curto do ato. " * 12
 
 
 def _ato(**kw) -> dict:
@@ -170,18 +172,17 @@ def test_cada_parte_leva_o_sumario_do_ato_inteiro():
     ultimos = {s[-1]["text"] for s in modelo.sistemas}
     assert len(ultimos) == 1 and "TÍTULO 6 (DO TEMA 6) — art. 31" in ultimos.pop()
     curto = FalsoModelo()
-    cn.categorizar(_ato(), "Art. 1º Curto.", curto, modelo=cn.MODELO_MASSA, uso=cn.Uso())
+    cn.categorizar(_ato(), CURTO, curto, modelo=cn.MODELO_MASSA, uso=cn.Uso())
     assert len(curto.sistemas[0]) == 3      # ato de uma parte só não precisa de sumário
 
 
-@pytest.mark.parametrize(("tipo", "numero", "ano", "esperado"), [
-    ("INSTRUCAO_NORMATIVA", "2.121", 2022, cn.MODELO_CADEIA),
-    ("INSTRUCAO_NORMATIVA", "247", 2002, cn.MODELO_CADEIA),
-    ("INSTRUCAO_NORMATIVA", "2.121", 2021, cn.MODELO_MASSA),
-    ("SOLUCAO_CONSULTA", "2121", 2022, cn.MODELO_MASSA),
+@pytest.mark.parametrize(("tipo", "numero", "ano"), [
+    ("INSTRUCAO_NORMATIVA", "2.121", 2022), ("INSTRUCAO_NORMATIVA", "2.121", 2021),
+    ("SOLUCAO_CONSULTA", "2121", 2022), ("PORTARIA", "1", 2026),
 ])
-def test_sonnet_so_na_cadeia_de_piscofins(tipo, numero, ano, esperado):
-    assert cn.escolher_modelo(tipo, numero, ano) == esperado
+def test_sonnet_em_todos_os_tipos(tipo, numero, ano):
+    """Decisão do dono em 24/09/2026: categorização com Sonnet no mínimo, sinal inclusive."""
+    assert cn.escolher_modelo(tipo, numero, ano) == cn.MODELO_CADEIA == cn.MODELO_SINAL
 
 
 def test_interpreta_json_com_cercas_e_recusa_texto_solto():
@@ -199,7 +200,7 @@ def test_resposta_mal_formada_derruba_o_ato_e_nao_fica_em_disco():
         modelo = FalsoModelo(corpo=lambda _n, r=ruim: r)
         for _ in range(2):
             with pytest.raises(cn.FalhaCategorizacao):
-                cn.categorizar(_ato(), "Art. 1º Curto.", modelo, modelo=cn.MODELO_MASSA,
+                cn.categorizar(_ato(), CURTO, modelo, modelo=cn.MODELO_MASSA,
                                uso=cn.Uso())
         assert len(modelo.mensagens) == 2, ruim     # não ficou em disco: pediu de novo
 
@@ -291,7 +292,7 @@ def test_resposta_guardada_nao_e_paga_de_novo():
     modelo = FalsoModelo()
     usos = [cn.Uso(), cn.Uso()]
     for uso in usos:
-        cn.categorizar(_ato(), "Art. 1º Texto curto.", modelo, modelo=cn.MODELO_MASSA, uso=uso)
+        cn.categorizar(_ato(), CURTO, modelo, modelo=cn.MODELO_MASSA, uso=uso)
     assert len(modelo.mensagens) == 1
     assert usos[1].por_modelo[cn.MODELO_MASSA]["do_disco"] == 1 and usos[1].custo() == 0
 
@@ -531,7 +532,7 @@ def test_parte_cortada_no_gerar_tambem_serve_ao_executar():
 def test_nenhuma_parte_com_materia_derruba_o_ato():
     vazio = FalsoModelo(corpo=lambda _n: {"materias": []})
     with pytest.raises(cn.FalhaCategorizacao, match="nenhuma parte"):
-        cn.categorizar(_ato(), "Art. 1º Curto.", vazio, modelo=cn.MODELO_MASSA, uso=cn.Uso())
+        cn.categorizar(_ato(), CURTO, vazio, modelo=cn.MODELO_MASSA, uso=cn.Uso())
 
 
 @precisa_banco
@@ -580,6 +581,8 @@ def test_erro_inesperado_num_ato_nao_derruba_o_lote(conn):
             raise RuntimeError("OpenAI fora do ar")
         return _vetores(textos)
 
+    conn.execute("UPDATE rfb_atos.ato_content SET texto_completo = %s WHERE ato_id = 2",
+                 (CURTO,))
     atos = cn.carregar_atos(conn, ids=[2, ATO])        # ato 2 (seed) vem primeiro e falha
     resultados = cn.executar_lote(conn, atos, FalsoModelo(), run_id="lote", uso=cn.Uso(),
                                   embed=vetor_instavel, limite=5000, saida=_mudo)
@@ -631,3 +634,95 @@ def test_fila_de_pendentes_so_com_texto_e_sem_materia(conn):
     ids = {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100)}
     assert ATO in ids and 2 in ids
     assert not ids & {1, 3, 4, 6}   # analisados, sem texto ou texto nulo
+
+
+def test_so_a_ementa_nao_e_categorizada():
+    with pytest.raises(cn.FalhaCategorizacao, match="só a ementa"):
+        cn.categorizar(_ato(), "## EMENTA\nDispõe sobre X.\n\nArt. 1º Curto.", FalsoModelo(),
+                       modelo=cn.MODELO_CADEIA, uso=cn.Uso())
+
+
+def test_portao_de_qualidade():
+    ok = {"materias": 4, "partes_sem_materia": [], "tema_fora_da_taxonomia": 0, "sem_solucao": 0,
+          "artigos_no_texto": 10, "cobertura_artigos": 0.1}
+    assert cn.portao(ok) == []                     # ato curto: cobertura de artigos não conta
+    assert cn.portao({**ok, "artigos_no_texto": 40, "cobertura_artigos": 0.5})
+    assert cn.portao({**ok, "tema_fora_da_taxonomia": 2})
+    assert cn.portao({**ok, "sem_solucao": 2})
+    assert cn.portao({**ok, "partes_sem_materia": ["3"]})
+
+
+def test_estimativa_calibrada_pela_in_2121():
+    e = cn.estimar({**_ato(), "texto_completo": "Art. 1º " + "palavra " * 5000}, cn.MODELO_CADEIA)
+    assert e["saida"] >= e["caracteres"] * cn.SAIDA_POR_CARACTERE
+
+
+def _conectar_como_writer():
+    c = psycopg.connect(DSN, autocommit=True)
+    c.execute("SET ROLE rfb_writer")
+    return c
+
+
+def _automatico(conn, **kw):
+    atos = cn.carregar_atos(conn, ids=[ATO])
+    opcoes = {"conectar": _conectar_como_writer, "run_id": "auto1", "uso": cn.Uso(),
+              "embed": _vetores, "limite": 5000, "paralelo": 2, "saida": _mudo,
+              "custo_max_ato": None}
+    return cn.automatico(atos, kw.pop("modelo_falso", FalsoModelo()), **{**opcoes, **kw})
+
+
+@precisa_banco
+def test_automatico_grava_o_que_passa_no_portao(conn):
+    curto = _texto_longo(titulos=3, artigos=4)        # 12 artigos: regra de cobertura não se aplica
+    conn.execute("UPDATE rfb_atos.ato_content SET texto_completo = %s WHERE ato_id = %s",
+                 (curto, ATO))
+    (r,) = _automatico(conn)
+    assert r["materias"] >= 1 and r["sem_sinal"] == r["sem_vetor"] == 0
+    assert _um(conn, "SELECT analise_completa FROM rfb_atos.ato WHERE id = %s", ATO) == (True,)
+    rodada = Path(os.environ["RFB_ATOS_DADOS"]) / "categorizacao" / "rodadas" / "auto1.jsonl"
+    assert json.loads(rodada.read_text(encoding="utf-8").splitlines()[0])["ato_id"] == ATO
+
+
+@precisa_banco
+def test_automatico_manda_para_revisao_e_tira_da_fila(conn):
+    """36 artigos no texto, o modelo falso cita poucos: cobertura baixa reprova no portão."""
+    (r,) = _automatico(conn)
+    assert any("cobertura" in m for m in r["revisar"]) and Path(r["relatorio"]).exists()
+    assert _um(conn, "SELECT count(*) FROM rfb_atos.ato_materia WHERE ato_id = %s", ATO) == (0,)
+    assert _um(conn, "SELECT metadados->'categorizacao_revisao'->>'run_id', analise_completa "
+                     "FROM rfb_atos.ato WHERE id = %s", ATO) == ("auto1", False)
+    assert ATO not in {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100)}
+
+
+@precisa_banco
+def test_automatico_respeita_o_teto_e_o_custo_por_ato(conn):
+    modelo = FalsoModelo()
+    (r,) = _automatico(conn, modelo_falso=modelo, teto_usd=0.0)
+    assert r["pulado"] and modelo.mensagens == []
+    (r,) = _automatico(conn, modelo_falso=modelo, custo_max_ato=0.000001)
+    assert "ato grande" in r["revisar"][0] and modelo.mensagens == []
+
+
+@precisa_banco
+def test_automatico_so_ementa_vai_para_revisao_sem_chamar(conn):
+    conn.execute("UPDATE rfb_atos.ato_content SET texto_completo = %s WHERE ato_id = %s",
+                 ("## EMENTA\nDispõe sobre X.", ATO))
+    modelo = FalsoModelo()
+    (r,) = _automatico(conn, modelo_falso=modelo)
+    assert "só a ementa" in r["revisar"][0] and modelo.mensagens == []
+
+
+@precisa_banco
+def test_fila_deixa_de_fora_nao_vigente_alterado_antigo_e_tipo_excluido(conn):
+    assert ATO in {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100,
+                                                   tipos=["INSTRUCAO_NORMATIVA"])}
+    assert ATO not in {a["id"] for a in cn.carregar_atos(
+        conn, pendentes=True, limit=100, excluir_tipos=["INSTRUCAO_NORMATIVA"])}
+    conn.execute("UPDATE rfb_atos.ato SET status_vigencia = 'vigente_alterado' WHERE id = %s",
+                 (ATO,))
+    assert ATO not in {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100)}
+    conn.execute("UPDATE rfb_atos.ato_content SET fonte_extracao = 'json_portal' "
+                 "WHERE ato_id = %s", (ATO,))
+    assert ATO in {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100)}
+    conn.execute("UPDATE rfb_atos.ato SET status_vigencia = 'nao_vigente' WHERE id = %s", (ATO,))
+    assert ATO not in {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100)}
