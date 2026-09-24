@@ -112,7 +112,9 @@ def _fatias(todos: list[dict], tamanho: int) -> list[list[dict]]:
 
 
 def enviar(atos: list[dict], cliente, *, modelo: str | None = None, limite: int | None = None,
-           teto_usd: float | None = None, saida=print) -> list[str]:
+           teto_usd: float | None = None, manual: bool = False, saida=print) -> list[str]:
+    """Monta e envia os lotes. `manual`: a rotina noturna não aplica o lote — só o `aplicar` com o
+    batch_id (ex.: reenvio depois de mudar a taxonomia, aplicado primeiro numa amostra)."""
     voando = em_voo()
     if voando:
         antes = len(atos)
@@ -138,6 +140,7 @@ def enviar(atos: list[dict], cliente, *, modelo: str | None = None, limite: int 
     for fatia in _fatias(todos, LOTE_MAX):
         manifesto = {
             "estado": "criando", "criado_em": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "manual": manual,
             "atos": sorted({x["ato_id"] for x in fatia}),
             "pedidos": {x["custom_id"]: {"ato_id": x["ato_id"], "arquivo": x["arquivo"],
                                          "modelo": x["modelo"]} for x in fatia}}
@@ -204,13 +207,19 @@ def baixar(batch_id: str, cliente, *, saida=print) -> dict | None:
 
 
 def aplicar(batch_id: str, cliente, *, conectar, chamar, embed=None, paralelo: int = 4,
-            teto_usd: float | None = None, saida=print) -> list[dict]:
-    """Baixa (se preciso) e roda o modo automático sobre os atos do lote."""
+            teto_usd: float | None = None, so_atos: list[int] | None = None,
+            saida=print) -> list[dict]:
+    """Baixa (se preciso) e roda o modo automático sobre os atos do lote. Com `so_atos`, só esses
+    (amostra): o lote continua "baixado" para o resto."""
     manifesto = json.loads((pasta_lotes() / f"{batch_id}.json").read_text(encoding="utf-8"))
     if manifesto["estado"] == "enviado" and baixar(batch_id, cliente, saida=saida) is None:
         return []
     with conectar() as conn:
-        atos = cn.carregar_atos(conn, ids=manifesto["atos"])
+        alvo = [a for a in manifesto["atos"] if so_atos is None or a in set(so_atos)]
+        if not alvo:                    # lista vazia em carregar_atos não filtraria nada
+            saida(f"[lote] {batch_id}: nenhum dos atos pedidos está no lote")
+            return []
+        atos = cn.carregar_atos(conn, ids=alvo)
     uso = cn.Uso()
     run_id = f"lote-{batch_id[-12:]}-{time.strftime('%Y%m%dT%H%M%S')}"
     resultados = cn.automatico(atos, chamar, conectar=conectar, run_id=run_id, uso=uso,
@@ -223,7 +232,8 @@ def aplicar(batch_id: str, cliente, *, conectar, chamar, embed=None, paralelo: i
         estados[e] = estados.get(e, 0) + 1
     # erro ou sinal/vetor incompleto: o lote fica "baixado" e é reaplicado na próxima rodada
     # (reaplicar não recategoriza — só completa o que faltou)
-    completo = not estados.get("erro") and not estados.get("incompleto")
+    completo = (not estados.get("erro") and not estados.get("incompleto")
+                and so_atos is None)
     manifesto.update(estado="aplicado" if completo else "baixado",
                      aplicado_em=time.strftime("%Y-%m-%dT%H:%M:%S"),
                      aplicacao={"run_id": run_id, **estados,
@@ -244,7 +254,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("enviar", help="monta e envia os lotes da fila (não grava no banco)")
-    e.add_argument("--tipos", nargs="+", required=True)
+    e.add_argument("--tipos", nargs="+", help="tipos da fila (obrigatório sem --ids-arquivo)")
+    e.add_argument("--ids-arquivo", help="um id de ato por linha: manda esses, fora da fila (ex.: "
+                   "reenvio dos atos em revisão depois de mudar a taxonomia)")
     e.add_argument("--limit", type=int, default=2000)
     e.add_argument("--plano", action="store_true", help="só conta e estima, não envia")
     sub.add_parser("status", help="lotes enviados e o estado de cada um")
@@ -252,18 +264,25 @@ def main() -> None:
     a.add_argument("batch_id", nargs="?", help="um lote (padrão: todos os terminados)")
     a.add_argument("--paralelo", type=int, default=4)
     a.add_argument("--teto-usd", type=float, help="gasto direto máximo (sinal e partes cortadas)")
+    a.add_argument("--atos-arquivo", help="um id por linha: aplica só esses atos do lote (amostra)")
     p.add_argument("--dsn")
     args = p.parse_args()
 
     if args.cmd == "enviar":
         with psycopg.connect(cn._dsn(args.dsn, False), autocommit=True) as conn:
-            atos = cn.carregar_atos(conn, pendentes=True, limit=args.limit, tipos=args.tipos)
+            if args.ids_arquivo:
+                ids = [int(x) for x in Path(args.ids_arquivo).read_text(encoding="utf-8").split()]
+                atos = cn.carregar_atos(conn, ids=ids)[:args.limit]
+            elif args.tipos:
+                atos = cn.carregar_atos(conn, pendentes=True, limit=args.limit, tipos=args.tipos)
+            else:
+                p.error("enviar pede --tipos ou --ids-arquivo")
         todos, fora = pedidos(atos)
         print(f"{len(atos)} atos na fila | {len(todos)} pedidos | {len(fora)} fora (sem modelo) | "
               f"~US$ {estimar_lote(atos):.2f} no lote (preço de referência com o desconto)")
         if args.plano:
             return
-        enviar(atos, cliente_anthropic())
+        enviar(atos, cliente_anthropic(), manual=bool(args.ids_arquivo))
         return
     cliente = cliente_anthropic()
     if args.cmd == "status":
@@ -282,7 +301,10 @@ def main() -> None:
         cn.exigir_schema(conn)
         cn.exigir_permissoes(conn)
     alvos = [args.batch_id] if args.batch_id else [
-        m["batch_id"] for m in manifestos() if m["estado"] in ("enviado", "baixado")]
+        m["batch_id"] for m in manifestos()
+        if m["estado"] in ("enviado", "baixado") and not m.get("manual")]
+    so_atos = ([int(x) for x in Path(args.atos_arquivo).read_text(encoding="utf-8").split()]
+               if args.atos_arquivo else None)
     chamar = cn.chamador_anthropic()
     import rotina_noturna as rn           # mesma trava da rotina: nunca dois aplicar juntos
     trava = rn.travar(rn._pasta())
@@ -292,7 +314,8 @@ def main() -> None:
     try:
         for batch_id in alvos:
             r = aplicar(batch_id, cliente, conectar=lambda: psycopg.connect(dsn, autocommit=True),
-                        chamar=chamar, paralelo=args.paralelo, teto_usd=args.teto_usd)
+                        chamar=chamar, paralelo=args.paralelo, teto_usd=args.teto_usd,
+                        so_atos=so_atos)
             # erro ou sinal/vetor faltando: saída 1 (o lote fica "baixado" para reaplicar)
             problemas += sum(1 for x in r if cn.estado_do_resultado(x) in ("erro", "incompleto"))
     finally:

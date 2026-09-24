@@ -1,5 +1,5 @@
 {
-  "_versao": "1.0",
+  "_versao": "1.1",
   "_descricao": "Taxonomia controlada para td-rfb-atos. Porte do CARF (taxonomia_controlada_v1) com adições para Soluções de Consulta, Soluções de Divergência, Instruções Normativas, Decretos, Portarias, ADIs e demais atos normativos da Receita Federal.",
   "_regra_geral": "Use APENAS os códigos e valores listados. Se nada se aplicar, use mecanismo '__NOVO_*'.",
   "_aplicavel_a": ["acordao_carf", "solucao_consulta", "solucao_divergencia", "instrucao_normativa", "decreto", "portaria", "ato_declaratorio_interpretativo", "ato_declaratorio_executivo", "ato_declaratorio_normativo", "parecer_normativo", "nota_tecnica", "resolucao", "ordem_servico"],
@@ -285,7 +285,7 @@
       },
       {
         "tema_macro": "PROCESSO_ADMINISTRATIVO",
-        "descricao": "Contencioso administrativo fiscal",
+        "descricao": "Contencioso administrativo fiscal e processo de consulta",
         "temas_especificos": [
           { "codigo": "PROCESSO_ADMINISTRATIVO.NULIDADE", "descricao": "Nulidade de atos/decisões" },
           { "codigo": "PROCESSO_ADMINISTRATIVO.PRETERICAO_DEFESA", "descricao": "Preterição do direito de defesa" },
@@ -294,7 +294,8 @@
           { "codigo": "PROCESSO_ADMINISTRATIVO.TEMPESTIVIDADE", "descricao": "Tempestividade" },
           { "codigo": "PROCESSO_ADMINISTRATIVO.LEGITIMIDADE", "descricao": "Legitimidade ativa/passiva" },
           { "codigo": "PROCESSO_ADMINISTRATIVO.DILIGENCIA", "descricao": "Diligência/perícia" },
-          { "codigo": "PROCESSO_ADMINISTRATIVO.INTIMACAO", "descricao": "Vícios de intimação" }
+          { "codigo": "PROCESSO_ADMINISTRATIVO.INTIMACAO", "descricao": "Vícios de intimação" },
+          { "codigo": "PROCESSO_ADMINISTRATIVO.INEFICACIA_CONSULTA", "descricao": "Ineficácia total ou parcial da consulta sobre interpretação da legislação tributária (IN RFB 2.058/2021, art. 27)" }
         ]
       },
       {
@@ -378,7 +379,7 @@
       },
       {
         "tema_macro": "BENEFICIO_FISCAL",
-        "descricao": "Incentivos, isenções, imunidades",
+        "descricao": "Incentivos, isenções, imunidades e regimes especiais de tributação",
         "temas_especificos": [
           { "codigo": "BENEFICIO_FISCAL.ISENCAO", "descricao": "Isenção em geral" },
           { "codigo": "BENEFICIO_FISCAL.IMUNIDADE", "descricao": "Imunidade constitucional" },
@@ -389,7 +390,8 @@
           { "codigo": "BENEFICIO_FISCAL.LEI_ROUANET", "descricao": "Lei Rouanet" },
           { "codigo": "BENEFICIO_FISCAL.PAT", "descricao": "PAT" },
           { "codigo": "BENEFICIO_FISCAL.ENTIDADE_SEM_FINS", "descricao": "Entidades sem fins lucrativos / filantrópicas" },
-          { "codigo": "BENEFICIO_FISCAL.PERSE", "descricao": "Programa Emergencial Setor de Eventos (PERSE)" }
+          { "codigo": "BENEFICIO_FISCAL.PERSE", "descricao": "Programa Emergencial Setor de Eventos (PERSE)" },
+          { "codigo": "BENEFICIO_FISCAL.RET_IMOBILIARIO", "descricao": "RET — regime especial de tributação da incorporação imobiliária (Lei 10.931/2004, arts. 1º a 10): opcional e irretratável, pagamento unificado de IRPJ, CSLL, PIS/Pasep e Cofins; não é isenção, e a receita no RET não apura PIS/Cofins não cumulativo. Loteamento só a partir de 28/06/2022 (Lei 14.382/2022) e com construção de casas vinculada" }
         ]
       },
       {
@@ -403,7 +405,9 @@
           { "codigo": "OBRIGACAO_ACESSORIA.ESOCIAL", "descricao": "eSocial" },
           { "codigo": "OBRIGACAO_ACESSORIA.ECF", "descricao": "ECF" },
           { "codigo": "OBRIGACAO_ACESSORIA.ECD", "descricao": "ECD" },
-          { "codigo": "OBRIGACAO_ACESSORIA.MULTA_DESCUMPRIMENTO", "descricao": "Multa por descumprimento" }
+          { "codigo": "OBRIGACAO_ACESSORIA.MULTA_DESCUMPRIMENTO", "descricao": "Multa por descumprimento" },
+          { "codigo": "OBRIGACAO_ACESSORIA.SISCOSERV", "descricao": "Siscoserv (registro de serviços, intangíveis e outras operações com o exterior) — obrigação já dispensada; atos históricos" },
+          { "codigo": "OBRIGACAO_ACESSORIA.DITR", "descricao": "DITR — a declaração do ITR (entrega, prazo, retificação), não o imposto em si" }
         ]
       },
       {
@@ -416,6 +420,26 @@
           { "codigo": "REFORMA_TRIBUTARIA.TRANSICAO", "descricao": "Regras de transição" },
           { "codigo": "REFORMA_TRIBUTARIA.CASHBACK", "descricao": "Cashback" },
           { "codigo": "REFORMA_TRIBUTARIA.SPLIT_PAYMENT", "descricao": "Split payment" }
+        ]
+      },
+      {
+        "tema_macro": "PRAZOS_TRIBUTARIOS",
+        "descricao": "Prazos de recolhimento de tributo e de entrega de obrigação acessória, e sua prorrogação. NÃO inclui decadência, prescrição (LANCAMENTO) nem prazo processual ou recursal (PROCESSO_ADMINISTRATIVO)",
+        "temas_especificos": [
+          { "codigo": "PRAZOS_TRIBUTARIOS.PRORROGACAO_CALAMIDADE", "descricao": "Prorrogação de prazo por calamidade pública: Portaria MF 12/2012 (tributos e parcelas de parcelamento; exige decreto estadual e domicílio no município abrangido) e IN RFB 1.243/2012 (obrigações acessórias); alcance na calamidade nacional do Decreto Legislativo 6/2020 (posição da RFB: não se aplica; há tese de autoaplicação)" }
+        ]
+      },
+      {
+        "tema_macro": "RETENCAO_NA_FONTE",
+        "descricao": "Retenção de tributos pela fonte pagadora: Imposto sobre a Renda Retido na Fonte (IRRF), CSLL, PIS/Pasep e Cofins. Prevalência: órgão público federal > plano de saúde > CSRF ou IRRF sobre serviços. Retenção previdenciária (11% sobre cessão de mão de obra) fica em CONTRIBUICOES_PREVIDENCIARIAS",
+        "temas_especificos": [
+          { "codigo": "RETENCAO_NA_FONTE.CSRF_SERVICOS", "descricao": "Retenção de CSLL, PIS/Pasep e Cofins por pessoa jurídica de direito privado sobre serviços do rol taxativo da Lei 10.833/2003, arts. 30 a 36, e IN SRF 459/2004: limpeza, conservação, manutenção, segurança, vigilância, transporte de valores, locação de mão de obra, assessoria creditícia e mercadológica, serviços profissionais" },
+          { "codigo": "RETENCAO_NA_FONTE.IRRF_SERVICOS", "descricao": "Retenção do imposto de renda por pagador privado sobre serviços prestados por pessoa jurídica (Decreto 9.580/2018 — RIR/2018, arts. 714 a 717): serviços profissionais, limpeza, conservação, segurança, mão de obra. Não é a parcela de IR da IN RFB 1.234/2012" },
+          { "codigo": "RETENCAO_NA_FONTE.ORGAOS_PUBLICOS", "descricao": "Retenção nos pagamentos de órgãos e entidades da administração pública federal (Lei 9.430/1996, art. 64; Lei 10.833/2003, art. 34; IN RFB 1.234/2012) e, só do imposto de renda, por estados, Distrito Federal e municípios" },
+          { "codigo": "RETENCAO_NA_FONTE.PLANOS_SAUDE", "descricao": "Retenção sobre pagamentos a operadoras de planos de saúde e cooperativas médicas: plano a preço preestabelecido não sofre a retenção do art. 30 da Lei 10.833/2003; custo operacional ou preço pós-estabelecido pode sofrer" },
+          { "codigo": "RETENCAO_NA_FONTE.AUTOPECAS", "descricao": "Retenção de PIS/Pasep e Cofins na venda de autopeças (Lei 10.485/2002, art. 3º, §§ 3º e 4º)" },
+          { "codigo": "RETENCAO_NA_FONTE.DEDUCAO_RESTITUICAO_RETIDO", "descricao": "Dedução do valor retido na contribuição devida pelo prestador e restituição ou compensação do excedente (Lei 11.727/2008, art. 5º). O retido não gera crédito de insumo para o tomador" },
+          { "codigo": "RETENCAO_NA_FONTE.RETENCAO_INDEVIDA", "descricao": "Retenção indevida ou a maior: serviço fora do rol legal, ente sem previsão legal para reter PIS/Pasep e Cofins (estados e municípios), alíquota ou base errada. É indébito recuperável pelo prestador" }
         ]
       }
     ],

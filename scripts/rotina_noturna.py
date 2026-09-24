@@ -124,8 +124,8 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                 cn.exigir_permissoes(conn)
                 aplicados = []
                 for m in lc.manifestos():
-                    if m["estado"] not in ("enviado", "baixado"):
-                        continue
+                    if m["estado"] not in ("enviado", "baixado") or m.get("manual"):
+                        continue            # lote manual só é aplicado à mão (amostra primeiro)
                     res = lc.aplicar(
                         m["batch_id"], cliente,
                         conectar=lambda: psycopg.connect(dsn, autocommit=True),
