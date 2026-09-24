@@ -726,3 +726,23 @@ def test_fila_deixa_de_fora_nao_vigente_alterado_antigo_e_tipo_excluido(conn):
     assert ATO in {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100)}
     conn.execute("UPDATE rfb_atos.ato SET status_vigencia = 'nao_vigente' WHERE id = %s", (ATO,))
     assert ATO not in {a["id"] for a in cn.carregar_atos(conn, pendentes=True, limit=100)}
+
+
+def test_sc_so_com_a_ementa_publicada_vai_como_base_ementa():
+    sc = {**_ato(), "tipo_ato": "SOLUCAO_CONSULTA", "texto_completo": "## EMENTA\nASSUNTO: PIS."}
+    assert cn.base_da_analise(sc) == "ementa"
+    assert cn.base_da_analise({**sc, "texto_completo": "Relatório\n\nA consulente..."}) == "texto"
+    assert cn.base_da_analise(_ato(texto_completo="## EMENTA\nx")) == "texto"   # IN: é a norma
+    msg = cn.mensagem_usuario(sc, cn.Parte("1", "x", ""), 1)
+    assert "a íntegra não é publicada" in msg
+
+
+@precisa_banco
+def test_materia_de_sc_so_ementa_grava_base_ementa(conn):
+    conn.execute("UPDATE rfb_atos.ato SET tipo_ato = 'SOLUCAO_CONSULTA' WHERE id = %s", (ATO,))
+    conn.execute("UPDATE rfb_atos.ato_content SET texto_completo = %s WHERE ato_id = %s",
+                 ("## EMENTA\nASSUNTO: PIS\n\n" + CURTO, ATO))
+    (r,) = _automatico(conn)
+    assert r["materias"] >= 1
+    assert {x[0] for x in conn.execute("SELECT base_analise FROM rfb_atos.ato_materia "
+                                       "WHERE ato_id = %s", (ATO,))} == {"ementa"}

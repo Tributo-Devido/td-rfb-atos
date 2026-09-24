@@ -74,6 +74,18 @@ PROMPT_NORMATIVO = REFS / "prompts" / "prompt_extrator_normativos.md"
 TAXONOMIA = REFS / "taxonomia.json"
 SCHEMAS_DIR = REFS / "schemas_metadata_tematico"
 TIPOS_SC = {"SOLUCAO_CONSULTA", "SOLUCAO_DIVERGENCIA", "SOLUCAO_CONSULTA_INTERNA"}
+# Rodada de pesquisa das Soluções de Consulta (24/09/2026): o portal publica a SC DISIT e COANA —
+# e boa parte das COSIT — só pela ementa (assunto, tese, dispositivos), como sai no DOU; a íntegra
+# (relatório, fundamentos) não existe no portal. 99% da fila pendente é assim.
+_INTEGRA_SC = re.compile(r"\b(RELAT[ÓO]RIO|FUNDAMENTOS?|FUNDAMENTA[ÇC][ÃA]O)\b", re.IGNORECASE)
+
+
+def base_da_analise(ato: dict) -> str:
+    """'ementa' quando a SC só tem a ementa publicada; 'texto' no resto (ato_materia.base_analise,
+    migration 011)."""
+    if ato.get("tipo_ato") in TIPOS_SC and not _INTEGRA_SC.search(ato.get("texto_completo") or ""):
+        return "ementa"
+    return "texto"
 
 MODELO_CADEIA = "claude-sonnet-5"
 MODELO_MASSA = "claude-haiku-4-5-20251001"   # o que categorizou a base antiga
@@ -346,6 +358,10 @@ def mensagem_usuario(ato: dict, parte: Parte, total: int) -> str:
         onde = f" (começa em: {parte.caminho})" if parte.caminho else ""
         linhas += ["", f"PARTE {parte.rotulo} de {total} do ato{onde}. As outras partes são "
                    "enviadas em separado: extraia só as matérias deste trecho."]
+    if base_da_analise(ato) == "ementa":
+        linhas += ["", "ATENÇÃO: este é o conteúdo publicado da Solução de Consulta — a ementa "
+                   "(assunto, tese e dispositivos); a íntegra não é publicada. Extraia só o que a "
+                   "ementa diz: fato_consultado fica null quando a ementa não o descreve."]
     linhas += ["", "CONTEUDO (trecho):" if fragmento else "CONTEUDO COMPLETO:", parte.texto,
                "</ato_input>", "",
                "Deixe relacoes_com_outros_atos como lista vazia: as relações do ato vêm do portal."]
@@ -700,11 +716,13 @@ SQL_MATERIA = (
     "INSERT INTO rfb_atos.ato_materia (ato_id, ordem, natureza, tema_macro, tema_especifico, "
     "subtema, tags, ementa_trecho, fato_consultado, solucao, fundamentacao_resumo, "
     "tese_contribuinte, tese_fazenda, tese_adotada, metadata_tematico, resultado, tributos, "
-    "regimes, llm_model, llm_processed_at, schema_version) VALUES (%(ato_id)s, %(ordem)s, "
+    "regimes, base_analise, llm_model, llm_processed_at, schema_version) VALUES (%(ato_id)s, "
+    "%(ordem)s, "
     "%(natureza)s, %(tema_macro)s, %(tema_especifico)s, %(subtema)s, %(tags)s, "
     "%(ementa_trecho)s, %(fato_consultado)s, %(solucao)s, %(fundamentacao_resumo)s, "
     "%(tese_contribuinte)s, %(tese_fazenda)s, %(tese_adotada)s, %(metadata_tematico)s, "
-    "%(resultado)s, %(tributos)s, %(regimes)s, %(llm_model)s, now(), 'v1') RETURNING id")
+    "%(resultado)s, %(tributos)s, %(regimes)s, %(base_analise)s, %(llm_model)s, now(), 'v1') "
+    "RETURNING id")
 
 
 def _json(valor):
@@ -716,7 +734,7 @@ def _sha256(texto: str) -> str:
 
 
 def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: str,
-              run_id: str) -> list[int]:
+              run_id: str, base_analise: str = "texto") -> list[int]:
     """Grava as matérias e marca o ato como analisado, numa transação. Devolve os ids novos."""
     if not materias:
         raise FalhaCategorizacao("o modelo não devolveu matéria nenhuma")
@@ -749,6 +767,7 @@ def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: st
         with conn.cursor() as cur:
             for m in materias:
                 cur.execute(SQL_MATERIA, {**m, "ato_id": ato_id, "llm_model": modelo,
+                                          "base_analise": base_analise,
                                           "metadata_tematico": Jsonb(m["metadata_tematico"])})
                 mid = cur.fetchone()[0]
                 ids.append(mid)
@@ -904,7 +923,8 @@ def processar_ato(conn, ato: dict, chamar, *, modelo: str, run_id: str, uso: Uso
         meta["texto_sha256"] = _sha256(ato["texto_completo"])
         norma = norma_do_ato(ato)
         linhas = [linha_materia(m, i, norma) for i, m in enumerate(materias, 1)]
-        ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id)
+        ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id,
+                        base_analise=base_da_analise(ato))
         partes = meta["partes"]
     else:
         ids = [r[0] for r in conn.execute(
@@ -1108,7 +1128,8 @@ def automatico_um(conn, ato: dict, chamar, *, run_id: str, uso: Uso, modelo: str
         marcar_revisao(conn, ato["id"], run_id, motivos, caminho)
         return {**rotulo, "revisar": motivos, "relatorio": str(caminho)}
     meta["texto_sha256"] = _sha256(ato["texto_completo"])
-    ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id)
+    ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id,
+                    base_analise=base_da_analise(ato))
     sinais = classificar_sinais(conn, ato["id"], ids, chamar, uso=uso)
     vetores = vetorizar(conn, ids, embed=embed)
     sem_sinal, sem_vetor = conn.execute(
