@@ -107,7 +107,7 @@ CADEIA_PISCOFINS = {("247", 2002), ("457", 2004), ("660", 2006), ("1717", 2017),
 LIMITE_PARTE = 25_000      # caracteres de teor por chamada
 MINIMO_PARTE = 4_000       # parte cortada no limite de tokens só é dividida se tiver 2x isto
 MAX_TOKENS = 32_000        # a chamada é por streaming (o prod_runner do CARF usa o mesmo)
-MAX_TOKENS_SINAL = 20      # o sinal é uma palavra
+MAX_TOKENS_SINAL = 1024    # o sinal é uma palavra, mas o Sonnet 5 pensa antes: com 20 saía vazio
 FONTE_EMBEDDING = "openai_text_embedding_3_large_3072"
 
 # Só para o plano (--executar mostra o uso real). Preço de referência por milhão de tokens
@@ -810,7 +810,8 @@ def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: st
         nova_eficacia = eficacia or proposta
         conn.execute(
             "UPDATE rfb_atos.ato SET analise_completa = true, eficacia_atual = %s, "
-            "metadados = COALESCE(metadados, '{}'::jsonb) || %s, atualizado_em = now() "
+            "metadados = (COALESCE(metadados, '{}'::jsonb) - 'categorizacao_revisao') || %s, "
+            "atualizado_em = now() "
             "WHERE id = %s",
             (nova_eficacia, Jsonb({"categorizacao": categorizacao}), ato_id))
         mudancas = [("ato", "analise_completa", False, True),
@@ -1101,9 +1102,13 @@ NOMES_TRIBUTO = {
     "CSLL": ("csll", "contribuicao social sobre o lucro", "lucro", "precos de transferencia"),
     "IRRF": ("irrf", "retido na fonte", "retencao", "na fonte"),
     "IRPF": ("irpf", "pessoa fisica", "imposto sobre a renda", "imposto de renda"),
-    "IPI": ("ipi", "produtos industrializados", "tipi"),
+    # classificação fiscal (NCM, TIPI, SH) serve ao II e ao IPI: é a âncora deles nas SC e SD da
+    # COANA/DIANA (piloto do aplicar, 24/09/2026: 40 falsos alarmes sem isto)
+    "IPI": ("ipi", "produtos industrializados", "tipi", "ncm", "classificacao de mercadoria",
+            "classificacao fiscal", "sistema harmonizado"),
     "II": ("imposto de importacao", "imposto sobre a importacao", "(ii)", " ii ", "tec ",
-           "tarifa externa", "importacao"),
+           "tarifa externa", "importacao", "ncm", "classificacao de mercadoria",
+           "classificacao fiscal", "sistema harmonizado"),
     "IE": ("imposto de exportacao", "imposto sobre a exportacao", "exportacao"),
     "IOF": ("iof", "operacoes de credito", "operacoes financeiras"),
     "ITR": ("itr", "territorial rural"),
@@ -1113,6 +1118,19 @@ NOMES_TRIBUTO = {
     "CONTRIB_TERCEIROS": ("terceiros", "sesi", "senai", "sesc", "senac", "sebrae", "senar",
                           "incra", "salario-educacao", "salario educacao"),
     "SIMPLES": ("simples",),
+}
+# Regimes que, por definição, reúnem vários tributos: citá-los ancora os tributos reunidos (aplicar
+# de 24/09/2026 — ex.: retenção da IN RFB 1.234/2012 e RET-Incorporação = IRPJ, CSLL, PIS e
+# Cofins, mesmo sem os nomes no texto).
+REGIMES_COMPOSTOS = {
+    "1.234": {"IRPJ", "CSLL", "PIS", "COFINS"},             # retenção por órgãos federais
+    "retencao tributaria": {"IRPJ", "CSLL", "PIS", "COFINS"},
+    "art. 30 da lei n 10.833": {"CSLL", "PIS", "COFINS"},   # retenção na fonte (CSRF)
+    "regime especial de tributacao": {"IRPJ", "CSLL", "PIS", "COFINS"},   # RET
+    "ret-incorporacao": {"IRPJ", "CSLL", "PIS", "COFINS"},
+    "simples nacional": {"IRPJ", "CSLL", "PIS", "COFINS", "IPI", "CONTRIB_PREV", "SIMPLES"},
+    "lucro presumido": {"IRPJ", "CSLL"},
+    "lucro real": {"IRPJ", "CSLL"},
 }
 _NUMERO_LEI = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{3,6})")
 
@@ -1126,9 +1144,10 @@ def ancoragem(texto_ato: str, linha: dict) -> list[str]:
     plano = _plano(texto_ato)
     so_digitos = re.sub(r"\D", "", plano)
     problemas = []
+    pelos_regimes = set().union(*[t for r, t in REGIMES_COMPOSTOS.items() if r in plano])
     for tributo in linha.get("tributos") or []:
         nomes = NOMES_TRIBUTO.get(tributo)
-        if nomes and not any(n in plano for n in nomes):
+        if nomes and tributo not in pelos_regimes and not any(n in plano for n in nomes):
             problemas.append(f"tributo {tributo} não aparece no texto")
     numeros_citados = []
     for d in linha.get("_dispositivos") or []:
@@ -1152,7 +1171,9 @@ def portao(resumo: dict) -> list[str]:
     n = resumo["materias"] or 0
     if resumo.get("partes_sem_materia"):
         motivos.append(f"partes sem matéria: {', '.join(resumo['partes_sem_materia'])}")
-    if n and resumo["tema_fora_da_taxonomia"] / n > 0.2:
+    # tema fora da taxonomia é lacuna da taxonomia, não erro da matéria: só reprova quando é a
+    # maioria (piloto de 24/09: 1 de 3 reprovava SCI boa)
+    if n and resumo["tema_fora_da_taxonomia"] / n > 0.5:
         motivos.append(f"{resumo['tema_fora_da_taxonomia']} de {n} matérias fora da taxonomia")
     if n and resumo["sem_solucao"] / n > 0.2:
         motivos.append(f"{resumo['sem_solucao']} de {n} matérias sem solução")
