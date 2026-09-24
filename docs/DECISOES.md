@@ -427,3 +427,31 @@ ADI 34/2004 — NCM da nafta e CIDE).
 
 **Decisão.** Liberados na rotina; lote enviado em 24/09. Falta, na ordem aprovada: Portarias (muitas
 administrativas de unidades locais — a rodada precisa separar as que tratam de tributo).
+
+---
+
+## 2026-09-24 · Revisão 4-LLM da PR #6 (antes do `aplicar` dos lotes) e ancoragem no portão
+
+**Achados que procederam** (Codex, Grok, Gemini) e correções:
+- *Ato preso sem sinal/vetor*: se o sinal ou o vetor falhavam depois de gravar as matérias, a
+  próxima tentativa via o ato "já analisado", pulava, e o lote era dado como aplicado. Agora ato com
+  matérias só completa sinal e vetor; lote com erro ou incompleto fica "baixado" e é reaplicado.
+- *Falha do lote virava chamada direta sem teto*: pedidos expirados ou com erro seriam refeitos a
+  preço cheio. O `aplicar` agora só usa as respostas em disco; o que falta fica pendente e vai no
+  próximo lote (inclusive as metades de resposta cortada no limite de tokens).
+- *Ato dividido entre lotes*: o corte a cada 1.500 pedidos podia separar partes do mesmo ato. Os
+  lotes agora são montados por ato.
+- *Teto parava a fila inteira* quando um ato não cabia (`break` → `continue`); *manifesto só depois
+  do `create`* (agora um provisório antes, que segura os atos 24 h se o processo cair no meio);
+  `aplicar` manual usa a mesma trava da rotina; revisão em massa vira alerta no resumo.
+- *Portão cego para conteúdo inventado* (Gemini): **ancoragem** — o tributo e o número das leis
+  citadas pela matéria têm de aparecer no texto do ato; mais de 20% das matérias sem âncora manda o
+  ato para revisão. Nas 36 matérias da calibração, 0 alarme falso (depois de aceitar "lucro" e
+  "preços de transferência" como sinal de IRPJ/CSLL).
+
+**Não procedeu.** Matéria gravada em dobro no reaplicar (Grok): `persistir` recusa ato que já tem
+matéria, e `UNIQUE (ato_id, ordem)` é a barreira final.
+
+**Em aberto.** Segunda leitura por modelo ("a solução contradiz o texto?", Gemini) para pegar tese
+invertida: custa uma chamada por matéria; a proposta é rodar em amostra de cada lote aplicado, como
+métrica de qualidade, e decidir com o número.

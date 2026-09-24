@@ -429,6 +429,10 @@ class Uso:
             d[k] += int(uso.get(k) or 0)
 
     def custo(self) -> float:
+        with self._trava:
+            return self._custo()
+
+    def _custo(self) -> float:
         total = 0.0
         for modelo, d in self.por_modelo.items():
             p_in, p_out = PRECO_REFERENCIA.get(modelo, (0.0, 0.0))
@@ -1016,6 +1020,8 @@ def relatorio(ato: dict, materias: list[dict], linhas: list[dict], meta: dict,
         "sem_tributo": sum(1 for linha in linhas if not linha["tributos"]),
         "tema_fora_da_taxonomia": sum(1 for linha in linhas
                                       if linha["tema_macro"] == "__NOVO_TEMA"),
+        "desancoradas": [f"matéria {linha['ordem']}: {', '.join(p)}" for linha in linhas
+                         if (p := ancoragem(ato["texto_completo"], linha))],
     }
     return {"ato_id": ato["id"], "modelo": modelo, "resumo": resumo, "materias": [
         {"parte": m.get("_parte"), **{k: v for k, v in linha.items() if not k.startswith("_")},
@@ -1083,6 +1089,62 @@ def gerar(atos: list[dict], chamar, *, run_id: str, uso: Uso, modelo: str | None
     return resultados
 
 
+# Ancoragem (revisão 4-LLM da PR #6, Gemini): o portão estrutural não pega tributo trocado nem lei
+# inventada. Conferência barata, sem modelo: o tributo e o número das leis citadas pela matéria têm
+# de aparecer no texto do ato (sem acento, sem maiúsculas). Tributo sem lista de nomes não é
+# conferido.
+NOMES_TRIBUTO = {
+    "PIS": ("pis", "pasep"),
+    "COFINS": ("cofins",),
+    "IRPJ": ("irpj", "imposto sobre a renda", "imposto de renda", "lucro",
+             "precos de transferencia"),
+    "CSLL": ("csll", "contribuicao social sobre o lucro", "lucro", "precos de transferencia"),
+    "IRRF": ("irrf", "retido na fonte", "retencao", "na fonte"),
+    "IRPF": ("irpf", "pessoa fisica", "imposto sobre a renda", "imposto de renda"),
+    "IPI": ("ipi", "produtos industrializados", "tipi"),
+    "II": ("imposto de importacao", "imposto sobre a importacao", "(ii)", " ii ", "tec ",
+           "tarifa externa", "importacao"),
+    "IE": ("imposto de exportacao", "imposto sobre a exportacao", "exportacao"),
+    "IOF": ("iof", "operacoes de credito", "operacoes financeiras"),
+    "ITR": ("itr", "territorial rural"),
+    "CIDE": ("cide",),
+    "CONTRIB_PREV": ("previdenci", "inss", "contribuicao social", "cpp", "esocial", "gfip",
+                     "seguridade"),
+    "CONTRIB_TERCEIROS": ("terceiros", "sesi", "senai", "sesc", "senac", "sebrae", "senar",
+                          "incra", "salario-educacao", "salario educacao"),
+    "SIMPLES": ("simples",),
+}
+_NUMERO_LEI = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{3,6})")
+
+
+def _plano(texto: str) -> str:
+    return " " + re.sub(r"\s+", " ", _sem_acento(texto or "").lower()) + " "
+
+
+def ancoragem(texto_ato: str, linha: dict) -> list[str]:
+    """Problemas de ancoragem de uma matéria (lista vazia = ancorada)."""
+    plano = _plano(texto_ato)
+    so_digitos = re.sub(r"\D", "", plano)
+    problemas = []
+    for tributo in linha.get("tributos") or []:
+        nomes = NOMES_TRIBUTO.get(tributo)
+        if nomes and not any(n in plano for n in nomes):
+            problemas.append(f"tributo {tributo} não aparece no texto")
+    numeros_citados = []
+    for d in linha.get("_dispositivos") or []:
+        if d[4] == "dispositivo_do_ato":
+            continue
+        m = _NUMERO_LEI.search(d[1] or "")
+        if m:
+            numeros_citados.append(m.group(1).replace(".", ""))
+    if numeros_citados:
+        fora = [n for n in numeros_citados if n not in so_digitos]
+        if len(fora) / len(numeros_citados) > 0.5:
+            problemas.append(f"{len(fora)} de {len(numeros_citados)} normas citadas não aparecem "
+                             "no texto")
+    return problemas
+
+
 def portao(resumo: dict) -> list[str]:
     """Regras do modo automático (aprovadas pelo dono em 24/09/2026). Lista vazia = grava; senão o
     ato vai para revisão com o relatório pronto."""
@@ -1096,6 +1158,10 @@ def portao(resumo: dict) -> list[str]:
         motivos.append(f"{resumo['sem_solucao']} de {n} matérias sem solução")
     if resumo["artigos_no_texto"] >= 20 and (resumo["cobertura_artigos"] or 0) < 0.8:
         motivos.append(f"cobertura de artigos {resumo['cobertura_artigos']:.0%} (mínimo 80%)")
+    desancoradas = resumo.get("desancoradas") or []
+    if n and len(desancoradas) / n > 0.2:
+        motivos.append(f"{len(desancoradas)} de {n} matérias sem âncora no texto: "
+                       + "; ".join(desancoradas[:3]))
     return motivos
 
 
@@ -1121,19 +1187,39 @@ def _registrar_rodada(run_id: str, linha: dict) -> None:
         f.write(json.dumps(linha, ensure_ascii=False, default=str) + "\n")
 
 
+def _completar(conn, ato: dict, ids: list[int], chamar, *, uso: Uso, embed=None) -> dict:
+    """Sinal e vetor das matérias `ids` que ainda não têm; devolve o que ficou faltando."""
+    sinais = classificar_sinais(conn, ato["id"], ids, chamar, uso=uso)
+    vetores = vetorizar(conn, ids, embed=embed)
+    sem_sinal, sem_vetor = conn.execute(
+        "SELECT count(*) FILTER (WHERE sinal IS NULL), count(*) FILTER (WHERE embedding IS NULL) "
+        "FROM rfb_atos.ato_materia WHERE id = ANY(%s)", (ids,)).fetchone()
+    return {"sinal": sinais, "vetores": vetores, "sem_sinal": sem_sinal, "sem_vetor": sem_vetor}
+
+
 def automatico_um(conn, ato: dict, chamar, *, run_id: str, uso: Uso, modelo: str,
                   embed=None, limite: int | None = None,
-                  custo_max_ato: float | None = CUSTO_MAX_ATO) -> dict:
-    """Um ato do modo automático: gera, passa pelo portão e grava — ou manda para revisão."""
+                  custo_max_ato: float | None = CUSTO_MAX_ATO, so_disco: bool = False) -> dict:
+    """Um ato do modo automático: gera, passa pelo portão e grava — ou manda para revisão.
+
+    Ato que já tem matérias (gravadas numa rodada que caiu antes do sinal ou do vetor) não é
+    categorizado de novo: só completa sinal e vetor (revisão 4-LLM da PR #6, Codex). Com `so_disco`
+    (lote), as matérias só saem das respostas em disco: faltou alguma, o ato fica pendente para o
+    próximo lote, sem chamada direta."""
     rotulo = {"ato_id": ato["id"], "tipo": ato["tipo_ato"], "numero": ato["numero"],
               "ano": ato["ano"]}
+    existentes = [r[0] for r in conn.execute(
+        "SELECT id FROM rfb_atos.ato_materia WHERE ato_id = %s ORDER BY ordem", (ato["id"],))]
+    if existentes:
+        return {**rotulo, "materias": len(existentes), "completado": True,
+                **_completar(conn, ato, existentes, chamar, uso=uso, embed=embed)}
     estimado = estimar(ato, modelo)["custo"]
     if custo_max_ato is not None and estimado > custo_max_ato:
         motivo = f"ato grande: ~US$ {estimado:.2f} (teto por ato US$ {custo_max_ato:.2f})"
         marcar_revisao(conn, ato["id"], run_id, [motivo])
         return {**rotulo, "revisar": [motivo]}
     materias, meta = categorizar(ato, ato["texto_completo"], chamar, modelo=modelo, uso=uso,
-                                 limite=limite)
+                                 limite=limite, so_disco=so_disco)
     norma = norma_do_ato(ato)
     linhas = [linha_materia(m, i, norma) for i, m in enumerate(materias, 1)]
     rel = relatorio(ato, materias, linhas, meta, modelo)
@@ -1145,20 +1231,30 @@ def automatico_um(conn, ato: dict, chamar, *, run_id: str, uso: Uso, modelo: str
     meta["texto_sha256"] = _sha256(ato["texto_completo"])
     ids = persistir(conn, ato["id"], linhas, meta, modelo=modelo, run_id=run_id,
                     base_analise=base_da_analise(ato))
-    sinais = classificar_sinais(conn, ato["id"], ids, chamar, uso=uso)
-    vetores = vetorizar(conn, ids, embed=embed)
-    sem_sinal, sem_vetor = conn.execute(
-        "SELECT count(*) FILTER (WHERE sinal IS NULL), count(*) FILTER (WHERE embedding IS NULL) "
-        "FROM rfb_atos.ato_materia WHERE id = ANY(%s)", (ids,)).fetchone()
-    return {**rotulo, "materias": len(ids), "partes": meta["partes"], "sinal": sinais,
-            "vetores": vetores, "sem_sinal": sem_sinal, "sem_vetor": sem_vetor,
-            "cobertura_artigos": rel["resumo"]["cobertura_artigos"]}
+    return {**rotulo, "materias": len(ids), "partes": meta["partes"],
+            "cobertura_artigos": rel["resumo"]["cobertura_artigos"],
+            **_completar(conn, ato, ids, chamar, uso=uso, embed=embed)}
+
+
+def estado_do_resultado(r: dict) -> str:
+    """gravado | completado | incompleto | revisar | pendente | pulado | erro."""
+    if r.get("erro"):
+        return "erro"
+    if r.get("revisar"):
+        return "revisar"
+    if r.get("pendente"):
+        return "pendente"
+    if r.get("pulado"):
+        return "pulado"
+    if r.get("sem_sinal") or r.get("sem_vetor"):
+        return "incompleto"
+    return "completado" if r.get("completado") else "gravado"
 
 
 def automatico(atos: list[dict], chamar, *, conectar, run_id: str, uso: Uso,
                modelo: str | None = None, embed=None, paralelo: int = 4,
                teto_usd: float | None = None, custo_max_ato: float | None = CUSTO_MAX_ATO,
-               limite: int | None = None, saida=print) -> list[dict]:
+               limite: int | None = None, so_disco: bool = False, saida=print) -> list[dict]:
     """Modo automático (rotina noturna): cada ato em paralelo, com conexão própria. Para de começar
     atos novos quando o gasto passa do teto. Cada resultado vai para
     RFB_ATOS_DADOS/categorizacao/rodadas/<run_id>.jsonl."""
@@ -1171,7 +1267,10 @@ def automatico(atos: list[dict], chamar, *, conectar, run_id: str, uso: Uso,
         try:
             with conectar() as conn:
                 r = automatico_um(conn, ato, chamar, run_id=run_id, uso=uso, modelo=escolhido,
-                                  embed=embed, limite=limite, custo_max_ato=custo_max_ato)
+                                  embed=embed, limite=limite, custo_max_ato=custo_max_ato,
+                                  so_disco=so_disco)
+        except SemRespostaConferida as e:   # lote: falta resposta; volta no próximo lote
+            r = {"ato_id": ato["id"], "pendente": str(e)}
         except AtoInapto as e:              # mudou de estado no meio (outra rodada): nada a fazer
             r = {"ato_id": ato["id"], "pulado": str(e)}
         except FalhaCategorizacao as e:     # só ementa, resposta inválida: sai da fila automática
@@ -1181,8 +1280,7 @@ def automatico(atos: list[dict], chamar, *, conectar, run_id: str, uso: Uso,
         except Exception as e:              # rede, API, banco: tenta de novo na próxima rodada
             r = {"ato_id": ato["id"], "erro": f"{type(e).__name__}: {e}", "tipo_erro": "inesperado"}
         _registrar_rodada(run_id, {**r, "custo_acumulado": round(uso.custo(), 4)})
-        estado = ("revisar" if r.get("revisar") else "erro" if r.get("erro")
-                  else "pulado" if r.get("pulado") else "ok")
+        estado = estado_do_resultado(r)
         saida(f"[{estado}] ato {ato['id']} ({ato['tipo_ato']} {ato['numero']}/{ato['ano']}) "
               f"| gasto ~US$ {uso.custo():.2f} | "
               + json.dumps({k: v for k, v in r.items() if k not in ("ato_id",)},
@@ -1349,8 +1447,7 @@ def main() -> None:
                 teto_usd=args.teto_usd, custo_max_ato=args.custo_max_ato)
             contagem: dict[str, int] = {}
             for r in resultados:
-                e = ("revisar" if r.get("revisar") else "erro" if r.get("erro")
-                     else "pulado" if r.get("pulado") else "gravado")
+                e = estado_do_resultado(r)
                 contagem[e] = contagem.get(e, 0) + 1
             print(f"\nrodada {run_id}: {contagem}")
         elif args.gerar:

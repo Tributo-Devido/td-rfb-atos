@@ -135,12 +135,15 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                                      {})
                         custo = ((feito.get("resultado") or {}).get("custo_usd", 0)
                                  + (feito.get("aplicacao") or {}).get("custo_direto_usd", 0))
-                        aplicados.append({"batch_id": m["batch_id"], "atos": len(res),
-                                          "gravados": sum(1 for x in res if x.get("materias")),
-                                          "materias": sum(x.get("materias") or 0 for x in res),
-                                          "revisar": sum(1 for x in res if x.get("revisar")),
-                                          "erros": sum(1 for x in res if x.get("erro")),
-                                          "custo_usd": round(custo, 2)})
+                        est = [cn.estado_do_resultado(x) for x in res]
+                        aplicados.append({
+                            "batch_id": m["batch_id"], "atos": len(res),
+                            "gravados": est.count("gravado"),
+                            "materias": sum(x.get("materias") or 0 for x in res
+                                            if not x.get("completado")),
+                            "revisar": est.count("revisar"), "pendentes": est.count("pendente"),
+                            "erros": est.count("erro") + est.count("incompleto"),
+                            "custo_usd": round(custo, 2)})
                 resumo["lotes_aplicados"] = aplicados
             atos = cn.carregar_atos(conn, pendentes=True, limit=cfg["limite_atos_por_noite"],
                                     tipos=cfg["tipos_categorizar"])

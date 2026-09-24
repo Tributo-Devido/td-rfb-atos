@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import psycopg
@@ -51,15 +52,31 @@ def pedidos(atos: list[dict], *, modelo: str | None = None,
             fora.append({"ato_id": ato["id"], "motivo": str(e)})
             continue
         for parte in partes:
-            usuario = cn.mensagem_usuario(ato, parte, len(partes))
-            arquivo = cn.arquivo_resposta(ato["id"], escolhido, sistema, usuario, cn.MAX_TOKENS)
-            if arquivo.exists():
-                continue
-            saida.append({"custom_id": f"a{ato['id']}-{arquivo.stem}", "ato_id": ato["id"],
-                          "arquivo": str(arquivo), "modelo": escolhido,
-                          "params": cn.argumentos_da_chamada(escolhido, sistema, usuario,
-                                                             cn.MAX_TOKENS)})
+            for usuario, arquivo in _faltam(ato, parte, len(partes), sistema, escolhido):
+                saida.append({"custom_id": f"a{ato['id']}-{arquivo.stem}", "ato_id": ato["id"],
+                              "arquivo": str(arquivo), "modelo": escolhido,
+                              "params": cn.argumentos_da_chamada(escolhido, sistema, usuario,
+                                                                 cn.MAX_TOKENS)})
     return saida, fora
+
+
+def _faltam(ato: dict, parte, total: int, sistema: list[dict], modelo: str,
+            profundidade: int = 0) -> list[tuple[str, Path]]:
+    """Pedidos que faltam para esta parte. Resposta cortada no limite de tokens já em disco: pede as
+    metades, na mesma divisão que o `_categorizar_parte` faria (revisão da PR #6)."""
+    usuario = cn.mensagem_usuario(ato, parte, total)
+    arquivo = cn.arquivo_resposta(ato["id"], modelo, sistema, usuario, cn.MAX_TOKENS)
+    if not arquivo.exists():
+        return [(usuario, arquivo)]
+    guardada = json.loads(arquivo.read_text(encoding="utf-8"))
+    if (guardada.get("parada") != "max_tokens" or len(parte.texto) < 2 * cn.MINIMO_PARTE
+            or profundidade >= 3):
+        return []
+    faltam = []
+    for i, sub in enumerate(cn.particionar(parte.texto, len(parte.texto) // 2 + 1), 1):
+        sub = cn.Parte(f"{parte.rotulo}.{i}", sub.texto, sub.caminho or parte.caminho)
+        faltam += _faltam(ato, sub, total, sistema, modelo, profundidade + 1)
+    return faltam
 
 
 def estimar_lote(atos: list[dict], modelo: str | None = None) -> float:
@@ -67,8 +84,31 @@ def estimar_lote(atos: list[dict], modelo: str | None = None) -> float:
 
 
 def em_voo() -> set[int]:
-    """Atos que estão num lote enviado e ainda não baixado (não podem ir de novo)."""
-    return {a for m in manifestos("enviado") for a in m["atos"]}
+    """Atos num lote enviado e ainda não baixado, ou sendo criado há menos de 24 h (não podem ir
+    de novo)."""
+    agora = time.time()
+    voando = {a for m in manifestos("enviado") for a in m["atos"]}
+    for m in manifestos("criando"):
+        criado = time.mktime(time.strptime(m["criado_em"], "%Y-%m-%dT%H:%M:%S"))
+        if agora - criado < 24 * 3600:
+            voando |= set(m["atos"])
+    return voando
+
+
+def _fatias(todos: list[dict], tamanho: int) -> list[list[dict]]:
+    """Lotes de até `tamanho` pedidos sem separar as partes de um mesmo ato (revisão da PR #6)."""
+    por_ato: dict[int, list[dict]] = {}
+    for x in todos:
+        por_ato.setdefault(x["ato_id"], []).append(x)
+    fatias, atual = [], []
+    for grupo in por_ato.values():
+        if atual and len(atual) + len(grupo) > tamanho:
+            fatias.append(atual)
+            atual = []
+        atual += grupo
+    if atual:
+        fatias.append(atual)
+    return fatias
 
 
 def enviar(atos: list[dict], cliente, *, modelo: str | None = None, limite: int | None = None,
@@ -84,7 +124,7 @@ def enviar(atos: list[dict], cliente, *, modelo: str | None = None, limite: int 
         for a in atos:
             custo = estimar_lote([a], modelo)
             if gasto + custo > teto_usd:
-                break
+                continue            # não cabe; um ato caro não segura os baratos atrás dele
             escolhidos.append(a)
             gasto += custo
         if len(escolhidos) < len(atos):
@@ -95,18 +135,21 @@ def enviar(atos: list[dict], cliente, *, modelo: str | None = None, limite: int 
     if fora:
         saida(f"[lote] {len(fora)} atos fora do lote (o modo automático trata sem modelo)")
     ids = []
-    for i in range(0, len(todos), LOTE_MAX):
-        fatia = todos[i:i + LOTE_MAX]
-        lote = cliente.messages.batches.create(
-            requests=[{"custom_id": x["custom_id"], "params": x["params"]} for x in fatia])
+    for fatia in _fatias(todos, LOTE_MAX):
         manifesto = {
-            "batch_id": lote.id, "estado": "enviado",
-            "criado_em": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "estado": "criando", "criado_em": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "atos": sorted({x["ato_id"] for x in fatia}),
             "pedidos": {x["custom_id"]: {"ato_id": x["ato_id"], "arquivo": x["arquivo"],
                                          "modelo": x["modelo"]} for x in fatia}}
-        (pasta_lotes() / f"{lote.id}.json").write_text(
-            json.dumps(manifesto, ensure_ascii=False), encoding="utf-8")
+        # o manifesto vem ANTES do lote: se o processo cair entre os dois, os atos ficam 24 h
+        # fora da fila em vez de irem num segundo lote pago (revisão da PR #6, Grok)
+        provisorio = pasta_lotes() / f"criando-{uuid.uuid4().hex}.json"
+        provisorio.write_text(json.dumps(manifesto, ensure_ascii=False), encoding="utf-8")
+        lote = cliente.messages.batches.create(
+            requests=[{"custom_id": x["custom_id"], "params": x["params"]} for x in fatia])
+        manifesto.update(batch_id=lote.id, estado="enviado")
+        _salvar(manifesto)
+        provisorio.unlink()
         saida(f"[lote] enviado {lote.id}: {len(fatia)} pedidos, {len(manifesto['atos'])} atos")
         ids.append(lote.id)
     return ids
@@ -172,14 +215,16 @@ def aplicar(batch_id: str, cliente, *, conectar, chamar, embed=None, paralelo: i
     run_id = f"lote-{batch_id[-12:]}-{time.strftime('%Y%m%dT%H%M%S')}"
     resultados = cn.automatico(atos, chamar, conectar=conectar, run_id=run_id, uso=uso,
                                embed=embed, paralelo=paralelo, teto_usd=teto_usd,
-                               custo_max_ato=None, saida=saida)
+                               custo_max_ato=None, so_disco=True, saida=saida)
     manifesto = json.loads((pasta_lotes() / f"{batch_id}.json").read_text(encoding="utf-8"))
     estados: dict[str, int] = {}
     for r in resultados:
-        e = ("revisar" if r.get("revisar") else "erro" if r.get("erro")
-             else "pulado" if r.get("pulado") else "gravado")
+        e = cn.estado_do_resultado(r)
         estados[e] = estados.get(e, 0) + 1
-    manifesto.update(estado="aplicado" if not estados.get("erro") else "baixado",
+    # erro ou sinal/vetor incompleto: o lote fica "baixado" e é reaplicado na próxima rodada
+    # (reaplicar não recategoriza — só completa o que faltou)
+    completo = not estados.get("erro") and not estados.get("incompleto")
+    manifesto.update(estado="aplicado" if completo else "baixado",
                      aplicado_em=time.strftime("%Y-%m-%dT%H:%M:%S"),
                      aplicacao={"run_id": run_id, **estados,
                                 "custo_direto_usd": round(uso.custo(), 2)})
@@ -229,7 +274,7 @@ def main() -> None:
                 c = lote.request_counts
                 extra = (f" | {lote.processing_status}: {c.succeeded} ok, {c.processing} "
                          f"processando, {c.errored} erro")
-            print(f"{m['batch_id']} {m['estado']:<9} {len(m['pedidos'])} pedidos, "
+            print(f"{m.get('batch_id', '(criando)')} {m['estado']:<9} {len(m['pedidos'])} pedidos, "
                   f"{len(m['atos'])} atos{extra}")
         return
     dsn = cn._dsn(args.dsn, True)
@@ -239,11 +284,16 @@ def main() -> None:
     alvos = [args.batch_id] if args.batch_id else [
         m["batch_id"] for m in manifestos() if m["estado"] in ("enviado", "baixado")]
     chamar = cn.chamador_anthropic()
+    import rotina_noturna as rn           # mesma trava da rotina: nunca dois aplicar juntos
+    trava = rn.travar(rn._pasta())
+    if trava is None:
+        sys.exit("[lote] a rotina noturna (ou outro aplicar) está rodando: tente depois")
     erros = 0
     for batch_id in alvos:
         r = aplicar(batch_id, cliente, conectar=lambda: psycopg.connect(dsn, autocommit=True),
                     chamar=chamar, paralelo=args.paralelo, teto_usd=args.teto_usd)
         erros += sum(1 for x in r if x.get("erro"))
+    trava.unlink(missing_ok=True)
     sys.exit(1 if erros else 0)
 
 

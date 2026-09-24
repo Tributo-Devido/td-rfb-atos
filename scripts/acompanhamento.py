@@ -32,9 +32,13 @@ def numeros(resumo: dict) -> dict:
     erro_etapa = bool(coleta.get("erro") or cat.get("erro"))
     erros_col = coleta.get("erros", 0) or 0
     erros_cat = sum(x.get("erros", 0) for x in aplicados)
+    gravados = sum(x.get("gravados", 0) for x in aplicados)
+    revisados = sum(x.get("revisar", 0) for x in aplicados)
+    # revisão em massa (mais da metade de 10+ atos) é sinal de portão ou modelo com problema
+    em_massa = revisados >= 10 and revisados > gravados
     if resumo.get("falhou"):
         estado = "falhou"
-    elif erro_etapa or erros_col or erros_cat:
+    elif erro_etapa or erros_col or erros_cat or em_massa:
         estado = "com_erro"
     else:
         estado = "ok"

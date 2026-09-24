@@ -22,7 +22,7 @@ precisa_banco = pytest.mark.skipif(not DSN, reason="defina PGTEST_DSN (Postgres 
 ATO = 900101
 REFERENCIA_IN = "Instrução Normativa RFB nº 2.121/2022"
 # ato de uma parte só, com corpo além da ementa (abaixo de MINIMO_CORPO o ato não é categorizado)
-CURTO = "Art. 1º " + "Texto curto do ato. " * 12
+CURTO = "Art. 1º PIS e Cofins, Lei nº 10.833/2003. " + "Texto curto do ato. " * 12
 
 
 def _ato(**kw) -> dict:
@@ -673,7 +673,9 @@ def _automatico(conn, **kw):
 
 @precisa_banco
 def test_automatico_grava_o_que_passa_no_portao(conn):
-    curto = _texto_longo(titulos=3, artigos=4)        # 12 artigos: regra de cobertura não se aplica
+    # 12 artigos: a regra de cobertura não se aplica; o preâmbulo ancora PIS, Cofins e a lei
+    curto = ("Dispõe sobre PIS e Cofins (Lei nº 10.833/2003).\n\n"
+             + _texto_longo(titulos=3, artigos=4))
     conn.execute("UPDATE rfb_atos.ato_content SET texto_completo = %s WHERE ato_id = %s",
                  (curto, ATO))
     (r,) = _automatico(conn)
@@ -746,3 +748,24 @@ def test_materia_de_sc_so_ementa_grava_base_ementa(conn):
     assert r["materias"] >= 1
     assert {x[0] for x in conn.execute("SELECT base_analise FROM rfb_atos.ato_materia "
                                        "WHERE ato_id = %s", (ATO,))} == {"ementa"}
+
+
+def test_ancoragem_pega_tributo_e_lei_que_nao_estao_no_texto():
+    texto = "Assunto: Cofins. Nos termos da Lei nº 10.833, de 2003, art. 3º, II, o crédito..."
+    boa = {"tributos": ["COFINS"],
+           "_dispositivos": [("lei", "Lei nº 10.833/2003", "art. 3º", None, "fundamento")]}
+    assert cn.ancoragem(texto, boa) == []
+    tributo_trocado = {**boa, "tributos": ["IPI"]}
+    assert cn.ancoragem(texto, tributo_trocado) == ["tributo IPI não aparece no texto"]
+    lei_inventada = {**boa, "_dispositivos": [
+        ("lei", "Lei nº 9.718/1998", "art. 3º", None, "fundamento"),
+        ("lei", "Lei nº 12.973/2014", "art. 1º", None, "fundamento")]}
+    assert "2 de 2 normas citadas" in cn.ancoragem(texto, lei_inventada)[0]
+    assert cn.ancoragem(texto, {"tributos": ["TRIBUTO_SEM_LISTA"], "_dispositivos": []}) == []
+
+
+def test_portao_reprova_ato_com_muitas_materias_sem_ancora():
+    ok = {"materias": 5, "partes_sem_materia": [], "tema_fora_da_taxonomia": 0, "sem_solucao": 0,
+          "artigos_no_texto": 0, "cobertura_artigos": None, "desancoradas": ["matéria 1: x"]}
+    assert cn.portao(ok) == []                                  # 1 de 5 = 20%: passa
+    assert "sem âncora" in cn.portao({**ok, "desancoradas": ["m1: x", "m2: y"]})[0]   # 40%
