@@ -455,3 +455,40 @@ matéria, e `UNIQUE (ato_id, ordem)` é a barreira final.
 **Em aberto.** Segunda leitura por modelo ("a solução contradiz o texto?", Gemini) para pegar tese
 invertida: custa uma chamada por matéria; a proposta é rodar em amostra de cada lote aplicado, como
 métrica de qualidade, e decidir com o número.
+
+## 2026-09-24 · Taxonomia 1.1: temas que faltavam (backfill de 24/09)
+
+**Contexto.** No backfill, 653 atos foram para revisão porque mais da metade das matérias caiu em
+`__NOVO_TEMA`. Agrupando os temas que o próprio modelo sugeriu, cinco famílias cobrem 417 atos:
+prorrogação de prazo na calamidade (256; SCs da DISIT da 7ª RF de 2020–21), retenção na fonte (95),
+ineficácia de consulta (25), RET imobiliário (24), Siscoserv e DITR (17). Aprovado pelo dono.
+
+**Decisão.** Dois macros novos — `PRAZOS_TRIBUTARIOS` (só `PRORROGACAO_CALAMIDADE`) e
+`RETENCAO_NA_FONTE` (7 específicos) — e quatro específicos em macros existentes, com os códigos que
+as categorizações antigas já usam no banco (`PROCESSO_ADMINISTRATIVO.INEFICACIA_CONSULTA`,
+`BENEFICIO_FISCAL.RET_IMOBILIARIO`, `OBRIGACAO_ACESSORIA.SISCOSERV` com 340 matérias antigas,
+`OBRIGACAO_ACESSORIA.DITR`). Os macros novos entram em `normalizacao_taxonomia.json`: sem isso o
+gravador os trocaria por `__NOVO_TEMA`. As descrições trazem limites, prevalência e a tese de
+recuperação (GR-8): plano de saúde a preço preestabelecido não sofre retenção; retenção fora do rol
+ou por ente sem previsão legal é indébito do prestador; o retido não gera crédito de insumo ao
+tomador; RET não é isenção e a receita nele não apura PIS/Cofins não cumulativo.
+
+**Alternativas descartadas.**
+- *Prazo e retenção como específicos de macros existentes* (Gemini): vencimento de tributo não é
+  obrigação acessória, e retenção não é crédito nem só responsabilidade — atravessa IRRF, CSLL,
+  PIS/Cofins. Codex e Grok mantiveram os macros; ficou a maioria.
+- *Macro `PRAZOS` genérico* e `PRAZOS.VENCIMENTO` (proposta inicial): amplo demais, atrairia
+  decadência, prescrição e prazo recursal. Virou `PRAZOS_TRIBUTARIOS`, com exclusão escrita e só o
+  específico medido.
+- *Aliases curtos* (`PRAZO`, `RETENCAO`, `PRORROGACAO_PRAZO`, `IRRF_RETENCAO_FONTE`): sem contexto
+  para escolher o macro; ficaram só variantes longas que o modelo emitiu no backfill.
+- *Afrouxar o portão* (gravar com `__NOVO_TEMA`): as matérias sumiriam das buscas por tema.
+
+**Teste de falsificação.** Cai se, no piloto do reenvio, a amostra revisada mostrar decadência ou
+prazo processual em `PRAZOS_TRIBUTARIOS`, retenção previdenciária de 11% em `RETENCAO_NA_FONTE`,
+plano pré-fixado tratado como retido, ou loteamento puro em `RET_IMOBILIARIO`.
+
+**Em aberto.** `normalizar_tema_especifico` aceita qualquer código com ponto (Codex): um específico
+inventado dentro de um macro válido é gravado e não aparece nas buscas. Validar contra a lista
+canônica (e contar como "fora da taxonomia" no portão) fica para PR própria. Temas menores (IOF,
+parcelamento, tributação internacional, Pilar 2) ficam para uma segunda rodada.

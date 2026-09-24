@@ -244,7 +244,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("enviar", help="monta e envia os lotes da fila (não grava no banco)")
-    e.add_argument("--tipos", nargs="+", required=True)
+    e.add_argument("--tipos", nargs="+", help="tipos da fila (obrigatório sem --ids-arquivo)")
+    e.add_argument("--ids-arquivo", help="um id de ato por linha: manda esses, fora da fila (ex.: "
+                   "reenvio dos atos em revisão depois de mudar a taxonomia)")
     e.add_argument("--limit", type=int, default=2000)
     e.add_argument("--plano", action="store_true", help="só conta e estima, não envia")
     sub.add_parser("status", help="lotes enviados e o estado de cada um")
@@ -257,7 +259,13 @@ def main() -> None:
 
     if args.cmd == "enviar":
         with psycopg.connect(cn._dsn(args.dsn, False), autocommit=True) as conn:
-            atos = cn.carregar_atos(conn, pendentes=True, limit=args.limit, tipos=args.tipos)
+            if args.ids_arquivo:
+                ids = [int(x) for x in Path(args.ids_arquivo).read_text(encoding="utf-8").split()]
+                atos = cn.carregar_atos(conn, ids=ids)[:args.limit]
+            elif args.tipos:
+                atos = cn.carregar_atos(conn, pendentes=True, limit=args.limit, tipos=args.tipos)
+            else:
+                p.error("enviar pede --tipos ou --ids-arquivo")
         todos, fora = pedidos(atos)
         print(f"{len(atos)} atos na fila | {len(todos)} pedidos | {len(fora)} fora (sem modelo) | "
               f"~US$ {estimar_lote(atos):.2f} no lote (preço de referência com o desconto)")
