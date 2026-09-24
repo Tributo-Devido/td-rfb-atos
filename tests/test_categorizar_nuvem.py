@@ -647,7 +647,8 @@ def test_portao_de_qualidade():
           "artigos_no_texto": 10, "cobertura_artigos": 0.1}
     assert cn.portao(ok) == []                     # ato curto: cobertura de artigos não conta
     assert cn.portao({**ok, "artigos_no_texto": 40, "cobertura_artigos": 0.5})
-    assert cn.portao({**ok, "tema_fora_da_taxonomia": 2})
+    assert cn.portao({**ok, "tema_fora_da_taxonomia": 2}) == []    # 2 de 4: lacuna, passa
+    assert cn.portao({**ok, "tema_fora_da_taxonomia": 3})           # a maioria: revisão
     assert cn.portao({**ok, "sem_solucao": 2})
     assert cn.portao({**ok, "partes_sem_materia": ["3"]})
 
@@ -769,3 +770,9 @@ def test_portao_reprova_ato_com_muitas_materias_sem_ancora():
           "artigos_no_texto": 0, "cobertura_artigos": None, "desancoradas": ["matéria 1: x"]}
     assert cn.portao(ok) == []                                  # 1 de 5 = 20%: passa
     assert "sem âncora" in cn.portao({**ok, "desancoradas": ["m1: x", "m2: y"]})[0]   # 40%
+
+
+def test_classificacao_ncm_ancora_ii_e_ipi():
+    texto = "ASSUNTO: Classificação de Mercadorias. Classifica-se no código NCM 8433.59.90 da TIPI."
+    assert cn.ancoragem(texto, {"tributos": ["II", "IPI"], "_dispositivos": []}) == []
+    assert cn.ancoragem(texto, {"tributos": ["PIS"], "_dispositivos": []})   # PIS: não ancora

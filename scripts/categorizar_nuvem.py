@@ -810,7 +810,8 @@ def persistir(conn, ato_id: int, materias: list[dict], meta: dict, *, modelo: st
         nova_eficacia = eficacia or proposta
         conn.execute(
             "UPDATE rfb_atos.ato SET analise_completa = true, eficacia_atual = %s, "
-            "metadados = COALESCE(metadados, '{}'::jsonb) || %s, atualizado_em = now() "
+            "metadados = (COALESCE(metadados, '{}'::jsonb) - 'categorizacao_revisao') || %s, "
+            "atualizado_em = now() "
             "WHERE id = %s",
             (nova_eficacia, Jsonb({"categorizacao": categorizacao}), ato_id))
         mudancas = [("ato", "analise_completa", False, True),
@@ -1101,9 +1102,13 @@ NOMES_TRIBUTO = {
     "CSLL": ("csll", "contribuicao social sobre o lucro", "lucro", "precos de transferencia"),
     "IRRF": ("irrf", "retido na fonte", "retencao", "na fonte"),
     "IRPF": ("irpf", "pessoa fisica", "imposto sobre a renda", "imposto de renda"),
-    "IPI": ("ipi", "produtos industrializados", "tipi"),
+    # classificação fiscal (NCM, TIPI, SH) serve ao II e ao IPI: é a âncora deles nas SC e SD da
+    # COANA/DIANA (piloto do aplicar, 24/09/2026: 40 falsos alarmes sem isto)
+    "IPI": ("ipi", "produtos industrializados", "tipi", "ncm", "classificacao de mercadoria",
+            "classificacao fiscal", "sistema harmonizado"),
     "II": ("imposto de importacao", "imposto sobre a importacao", "(ii)", " ii ", "tec ",
-           "tarifa externa", "importacao"),
+           "tarifa externa", "importacao", "ncm", "classificacao de mercadoria",
+           "classificacao fiscal", "sistema harmonizado"),
     "IE": ("imposto de exportacao", "imposto sobre a exportacao", "exportacao"),
     "IOF": ("iof", "operacoes de credito", "operacoes financeiras"),
     "ITR": ("itr", "territorial rural"),
@@ -1152,7 +1157,9 @@ def portao(resumo: dict) -> list[str]:
     n = resumo["materias"] or 0
     if resumo.get("partes_sem_materia"):
         motivos.append(f"partes sem matéria: {', '.join(resumo['partes_sem_materia'])}")
-    if n and resumo["tema_fora_da_taxonomia"] / n > 0.2:
+    # tema fora da taxonomia é lacuna da taxonomia, não erro da matéria: só reprova quando é a
+    # maioria (piloto de 24/09: 1 de 3 reprovava SCI boa)
+    if n and resumo["tema_fora_da_taxonomia"] / n > 0.5:
         motivos.append(f"{resumo['tema_fora_da_taxonomia']} de {n} matérias fora da taxonomia")
     if n and resumo["sem_solucao"] / n > 0.2:
         motivos.append(f"{resumo['sem_solucao']} de {n} matérias sem solução")
