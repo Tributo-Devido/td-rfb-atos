@@ -27,6 +27,8 @@ REGISTRO: dict[str, tuple[str, str, str | None]] = {
     "admin": ("RFB_ATOS_DSN_ADMIN", "/td/admin/ratio-pg-dsn-admin", "executive"),
     "openai": ("OPENAI_API_KEY", "/td/llm/openai-api-key", None),
     "anthropic": ("ANTHROPIC_API_KEY", "/td/llm/anthropic-api-key", None),
+    # webhook de entrada do canal que recebe o resumo da rotina noturna (acompanhamento.py)
+    "slack": ("RFB_ATOS_SLACK_WEBHOOK", "/td/slack/rfb-atos-rotina-webhook", None),
 }
 DSNS = frozenset({"leitura", "escrita", "admin"})
 OVERRIDE_DSN = "RFB_ATOS_DSN"

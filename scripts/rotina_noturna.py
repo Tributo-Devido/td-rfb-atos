@@ -9,7 +9,9 @@ Uma rodada por noite (Agendador de Tarefas do Windows, `rotina_noturna.ps1`):
         `references/rotina_noturna.json` (cada tipo só entra depois da rodada de pesquisa dele —
         decisão do dono em 24/09/2026), até o teto de gasto da noite. O que é enviado numa noite
         é gravado na seguinte;
-  3. resumo em RFB_ATOS_DADOS/rotina/AAAA-MM-DD.json e log em AAAA-MM-DD.log.
+  3. resumo em RFB_ATOS_DADOS/rotina/AAAA-MM-DD.json e log em AAAA-MM-DD.log; a mesma rodada
+     vai para `rfb_atos.rotina_execucao` (migration 012) e para o Slack (`acompanhamento.py`).
+     De manhã, `--conferir` (segunda tarefa) alerta se a rodada da noite não aconteceu.
 
 Trava contra duas rodadas ao mesmo tempo (rotina/rotina.lock; vencida após 12 h). Um passo com
 erro não impede o outro. Saída: 0 ok; 1 algum erro (ou banco fora do ar: VPN); 2 já rodando.
@@ -18,6 +20,8 @@ Uso:
     python rotina_noturna.py              # rodada completa
     python rotina_noturna.py --sem-coleta # só categoriza a fila
     python rotina_noturna.py --plano      # mostra o que faria, sem chamar modelo nem gravar
+    python rotina_noturna.py --conferir   # checagem da manhã: a rodada da noite aconteceu?
+    python rotina_noturna.py --painel     # as últimas rodadas registradas no banco
 """
 from __future__ import annotations
 
@@ -32,6 +36,7 @@ from pathlib import Path
 
 import psycopg
 
+import acompanhamento as ac
 import categorizar_nuvem as cn
 import coletar_atos_portal as col
 import lote_categorizacao as lc
@@ -101,10 +106,13 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                 r = col.coletar_novos(conn, portal or col.Portal(), desde=desde,
                                       aplicar=not plano, run_id=run_id,
                                       tipos=cfg.get("coletar_tipos"), saida=log)
+                novos = [x for x in r if x.get("ato_id") and not x.get("ja_existia")]
+                por_tipo: dict[str, int] = {}
+                for x in novos:
+                    por_tipo[x.get("tipo") or "?"] = por_tipo.get(x.get("tipo") or "?", 0) + 1
                 resumo["coleta"] = {
-                    "desde": desde.isoformat(), "no_portal": len(r),
-                    "gravados": sum(1 for x in r if x.get("ato_id") and not x.get("ja_existia")),
-                    "erros": sum(1 for x in r if x.get("erro"))}
+                    "desde": desde.isoformat(), "no_portal": len(r), "gravados": len(novos),
+                    "por_tipo": por_tipo, "erros": sum(1 for x in r if x.get("erro"))}
             except Exception as e:
                 log(f"[coleta] ERRO {type(e).__name__}: {e}")
                 resumo["coleta"] = {"erro": f"{type(e).__name__}: {e}"}
@@ -123,10 +131,16 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                         chamar=chamar or cn.chamador_anthropic(), embed=embed,
                         paralelo=cfg["paralelo"], saida=log)
                     if res:
+                        feito = next((x for x in lc.manifestos() if x["batch_id"] == m["batch_id"]),
+                                     {})
+                        custo = ((feito.get("resultado") or {}).get("custo_usd", 0)
+                                 + (feito.get("aplicacao") or {}).get("custo_direto_usd", 0))
                         aplicados.append({"batch_id": m["batch_id"], "atos": len(res),
                                           "gravados": sum(1 for x in res if x.get("materias")),
+                                          "materias": sum(x.get("materias") or 0 for x in res),
                                           "revisar": sum(1 for x in res if x.get("revisar")),
-                                          "erros": sum(1 for x in res if x.get("erro"))})
+                                          "erros": sum(1 for x in res if x.get("erro")),
+                                          "custo_usd": round(custo, 2)})
                 resumo["lotes_aplicados"] = aplicados
             atos = cn.carregar_atos(conn, pendentes=True, limit=cfg["limite_atos_por_noite"],
                                     tipos=cfg["tipos_categorizar"])
@@ -141,7 +155,9 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                 _, fora = lc.pedidos([a for a in atos if a["id"] not in lc.em_voo()])
                 for f in fora:
                     cn.marcar_revisao(conn, f["ato_id"], run_id, [f["motivo"]])
+                enviados = sum(len(x["atos"]) for x in lc.manifestos() if x["batch_id"] in ids)
                 resumo["categorizacao"] = {"fila": len(atos), "lotes_enviados": ids,
+                                           "atos_enviados": enviados,
                                            "para_revisao_sem_modelo": len(fora)}
         except SystemExit as e:
             log(f"[categorização] ERRO {e}")
@@ -149,6 +165,12 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
         except Exception as e:
             log(f"[categorização] ERRO {type(e).__name__}: {e}")
             resumo["categorizacao"] = {"erro": f"{type(e).__name__}: {e}"}
+        try:
+            ultima = col.ultima_publicacao(conn)
+            resumo["base_atualizada_ate"] = (min(ultima, date.today()).isoformat()
+                                             if ultima else None)
+        except Exception:
+            resumo["base_atualizada_ate"] = None
     resumo["fim"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     return resumo
 
@@ -164,10 +186,21 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--sem-coleta", action="store_true")
     p.add_argument("--plano", action="store_true", help="não chama modelo nem grava")
+    p.add_argument("--conferir", action="store_true",
+                   help="checagem da manhã: alerta no Slack se a rodada da noite não aconteceu")
+    p.add_argument("--painel", action="store_true", help="últimas rodadas registradas no banco")
     p.add_argument("--dsn")
     args = p.parse_args()
     pasta = _pasta()
     log = Log(pasta / f"{date.today().isoformat()}.log")
+    if args.conferir:
+        estado = ac.conferir(pasta, log=log)
+        log(f"[conferência] {estado}")
+        sys.exit(0 if estado == "ok" else 1)
+    if args.painel:
+        with psycopg.connect(cn._dsn(args.dsn, False)) as conn:
+            print(ac.painel(conn))
+        return
     trava = travar(pasta)
     if trava is None:
         log("[rotina] outra rodada em andamento (rotina.lock): saindo")
@@ -176,16 +209,30 @@ def main() -> None:
         cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
         dsn = cn._dsn(args.dsn, not args.plano)
         if not banco_alcancavel(dsn):
-            log("[rotina] banco fora de alcance (VPN desligada?): nada feito; tenta na próxima")
+            resumo = {"run_id": f"rotina-{time.strftime('%Y%m%dT%H%M%S')}",
+                      "inicio": ac.agora_iso(), "fim": ac.agora_iso(),
+                      "falhou": "banco fora de alcance (VPN desligada?); tenta na próxima noite"}
+            log(f"[rotina] {resumo['falhou']}")
+            _guardar(pasta, resumo)
+            if not args.plano:
+                ac.enviar_slack(ac.mensagem(resumo), log=log)
             sys.exit(1)
         log(f"[rotina] início | config {cfg}")
         resumo = rodada(cfg, dsn=dsn, coletar=not args.sem_coleta, plano=args.plano, log=log)
-        (pasta / f"{date.today().isoformat()}.json").write_text(
-            json.dumps(resumo, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        _guardar(pasta, resumo)
         log(f"[rotina] fim | {json.dumps(resumo, ensure_ascii=False, default=str)[:600]}")
+        if not args.plano:
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                ac.registrar(conn, resumo, log=log)
+            ac.enviar_slack(ac.mensagem(resumo), log=log)
         sys.exit(1 if teve_erro(resumo) else 0)
     finally:
         trava.unlink(missing_ok=True)
+
+
+def _guardar(pasta: Path, resumo: dict) -> None:
+    (pasta / f"{date.today().isoformat()}.json").write_text(
+        json.dumps(resumo, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
 if __name__ == "__main__":

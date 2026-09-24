@@ -441,17 +441,17 @@ def coletar_item(conn, tipo: str, item: dict, portal, *, aplicar: bool, run_id: 
     existente = _id_por_portal(conn, item["idAto"])   # antes de baixar: não gasta o portal
     if existente:
         saida(f"[já na base] {rotulo}: ato {existente}")
-        return {"alvo": rotulo, "ato_id": existente, "ja_existia": True}
+        return {"alvo": rotulo, "tipo": tipo, "ato_id": existente, "ja_existia": True}
     vigente = portal.visao(item["idAto"], "vigente")
     relacional = portal.visao(item["idAto"], "relacional") or {}
     if not vigente:
         saida(f"[erro] {rotulo}: visão vigente indisponível")
-        return {"alvo": rotulo, "erro": "visão vigente indisponível"}
+        return {"alvo": rotulo, "tipo": tipo, "erro": "visão vigente indisponível"}
     linha = linha_ato(tipo, item, vigente)
     existente = ja_na_base(conn, linha)
     if existente:
         saida(f"[já na base] {rotulo}: ato {existente}")
-        return {"alvo": rotulo, "ato_id": existente, "ja_existia": True}
+        return {"alvo": rotulo, "tipo": tipo, "ato_id": existente, "ja_existia": True}
     revogadores = {imp["idAto"] for imp in relacional.get("impactosPoloAtivo") or []
                    if imp.get("sigla") == "REV" and imp.get("idAto")}
     inicio = {}
@@ -468,12 +468,12 @@ def coletar_item(conn, tipo: str, item: dict, portal, *, aplicar: bool, run_id: 
           f"{len(arestas_do_portal(linha['id_portal'], None, relacional))} relações | fim: "
           f"{_fim_legivel(fim, origem_fim)}")
     if not aplicar:
-        return {"alvo": rotulo, "plano": True, "caracteres": len(texto)}
+        return {"alvo": rotulo, "tipo": tipo, "plano": True, "caracteres": len(texto)}
     original = portal.visao(item["idAto"], "original")
     resumo = gravar_ato(conn, linha, vigente, original, relacional, inicio, run_id=run_id,
                         origem=f"{cap.API}/{item['idAto']}/visao/vigente")
     saida(f"[ok] {rotulo}: {resumo}")
-    return {"alvo": rotulo, **resumo}
+    return {"alvo": rotulo, "tipo": tipo, **resumo}
 
 
 def tipos_do_portal() -> list[str]:
@@ -524,7 +524,7 @@ def coletar_novos(conn, portal, *, desde: date, aplicar: bool, run_id: str,
                                            rotulo=f"{tipo} {item['cols'][1]}"))
         except Exception as e:
             saida(f"[erro] {tipo} idAto {item['idAto']}: {type(e).__name__}: {e}")
-            resultados.append({"alvo": f"{tipo} idAto {item['idAto']}",
+            resultados.append({"alvo": f"{tipo} idAto {item['idAto']}", "tipo": tipo,
                                "erro": f"{type(e).__name__}: {e}"})
     return resultados
 
