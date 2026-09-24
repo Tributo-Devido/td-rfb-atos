@@ -184,3 +184,19 @@ def test_vetor_que_falha_depois_de_gravar_e_completado_no_reaplicar(conn):  # no
     assert conn.execute("SELECT count(*) FROM rfb_atos.ato_materia WHERE ato_id = %s",
                         (ATO,)).fetchone()[0] == antes             # nada gravado de novo
     assert lc.manifestos()[0]["estado"] == "aplicado"
+
+
+@precisa_banco
+def test_lote_manual_aplica_so_a_amostra_e_fica_baixado(conn):  # noqa: F811
+    conn.execute("UPDATE rfb_atos.ato_content SET texto_completo = %s WHERE ato_id = %s",
+                 (CURTO, ATO))
+    lote = LoteFalso()
+    (bid,) = lc.enviar(cn.carregar_atos(conn, ids=[ATO]), _cliente(lote), manual=True,
+                       saida=_mudo)
+    assert lc.manifestos()[0]["manual"] is True
+    assert lc.aplicar(bid, _cliente(lote), conectar=_conectar_como_writer, chamar=FalsoModelo(),
+                      embed=_vetores, paralelo=1, so_atos=[-1], saida=_mudo) == []
+    assert lc.manifestos()[0]["estado"] == "baixado"      # a amostra não fecha o lote
+    (r,) = lc.aplicar(bid, _cliente(lote), conectar=_conectar_como_writer, chamar=FalsoModelo(),
+                      embed=_vetores, paralelo=1, saida=_mudo)
+    assert r.get("materias") and lc.manifestos()[0]["estado"] == "aplicado"
