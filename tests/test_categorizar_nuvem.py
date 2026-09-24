@@ -776,3 +776,11 @@ def test_classificacao_ncm_ancora_ii_e_ipi():
     texto = "ASSUNTO: Classificação de Mercadorias. Classifica-se no código NCM 8433.59.90 da TIPI."
     assert cn.ancoragem(texto, {"tributos": ["II", "IPI"], "_dispositivos": []}) == []
     assert cn.ancoragem(texto, {"tributos": ["PIS"], "_dispositivos": []})   # PIS: não ancora
+
+
+def test_regime_composto_ancora_os_tributos_reunidos():
+    texto = ("RETENÇÃO TRIBUTÁRIA. A retenção a que estão obrigados os órgãos relacionados no "
+             "art. 2º da Instrução Normativa RFB nº 1.234, de 2012, não se estende aos entes.")
+    linha = {"tributos": ["IRPJ", "CSLL", "PIS", "COFINS"], "_dispositivos": []}
+    assert cn.ancoragem(texto, linha) == []
+    assert cn.ancoragem(texto, {**linha, "tributos": ["IPI"]})   # IPI não é da retenção

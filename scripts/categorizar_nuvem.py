@@ -1119,6 +1119,19 @@ NOMES_TRIBUTO = {
                           "incra", "salario-educacao", "salario educacao"),
     "SIMPLES": ("simples",),
 }
+# Regimes que, por definição, reúnem vários tributos: citá-los ancora os tributos reunidos (rodada do
+# aplicar de 24/09/2026 — ex.: retenção da IN RFB 1.234/2012 e RET-Incorporação = IRPJ, CSLL, PIS e
+# Cofins, mesmo sem os nomes no texto).
+REGIMES_COMPOSTOS = {
+    "1.234": {"IRPJ", "CSLL", "PIS", "COFINS"},             # retenção por órgãos federais
+    "retencao tributaria": {"IRPJ", "CSLL", "PIS", "COFINS"},
+    "art. 30 da lei n 10.833": {"CSLL", "PIS", "COFINS"},   # retenção na fonte (CSRF)
+    "regime especial de tributacao": {"IRPJ", "CSLL", "PIS", "COFINS"},   # RET
+    "ret-incorporacao": {"IRPJ", "CSLL", "PIS", "COFINS"},
+    "simples nacional": {"IRPJ", "CSLL", "PIS", "COFINS", "IPI", "CONTRIB_PREV", "SIMPLES"},
+    "lucro presumido": {"IRPJ", "CSLL"},
+    "lucro real": {"IRPJ", "CSLL"},
+}
 _NUMERO_LEI = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{3,6})")
 
 
@@ -1131,9 +1144,10 @@ def ancoragem(texto_ato: str, linha: dict) -> list[str]:
     plano = _plano(texto_ato)
     so_digitos = re.sub(r"\D", "", plano)
     problemas = []
+    pelos_regimes = set().union(*[t for r, t in REGIMES_COMPOSTOS.items() if r in plano])
     for tributo in linha.get("tributos") or []:
         nomes = NOMES_TRIBUTO.get(tributo)
-        if nomes and not any(n in plano for n in nomes):
+        if nomes and tributo not in pelos_regimes and not any(n in plano for n in nomes):
             problemas.append(f"tributo {tributo} não aparece no texto")
     numeros_citados = []
     for d in linha.get("_dispositivos") or []:
