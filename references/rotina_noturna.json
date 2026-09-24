@@ -1,0 +1,9 @@
+{
+  "_leia": "Configuração da rotina noturna (scripts/rotina_noturna.py). tipos_categorizar: só os tipos cuja rodada de pesquisa foi feita (docs/DECISOES.md). coletar_tipos: null = todos os tipos do portal.",
+  "tipos_categorizar": ["SOLUCAO_CONSULTA"],
+  "coletar_tipos": null,
+  "teto_usd_por_noite": 20.0,
+  "custo_max_ato": 3.0,
+  "limite_atos_por_noite": 400,
+  "paralelo": 4
+}

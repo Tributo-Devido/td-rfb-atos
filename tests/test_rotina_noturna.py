@@ -1,0 +1,66 @@
+"""rotina_noturna.py — janela de coleta, trava, rodada inteira com portal e modelo falsos."""
+from __future__ import annotations
+
+import os
+from datetime import date
+
+import pytest
+
+import rotina_noturna as rn
+from test_categorizar_nuvem import FalsoModelo, _vetores
+from test_coletar_atos_portal import IN, PortalFalso, _linha_html, _listagem
+from test_coletar_atos_portal import conn  # noqa: F401  (fixture: banco como rfb_writer)
+
+DSN = os.environ.get("PGTEST_DSN")
+precisa_banco = pytest.mark.skipif(not DSN, reason="defina PGTEST_DSN (Postgres descartável)")
+
+
+def test_janela_de_coleta_nunca_comeca_no_futuro():
+    assert rn.janela_de_coleta(date(2026, 9, 20), hoje=date(2026, 9, 24)) == date(2026, 9, 10)
+    assert rn.janela_de_coleta(date(2099, 1, 1), hoje=date(2026, 9, 24)) == date(2026, 9, 14)
+    assert rn.janela_de_coleta(None, hoje=date(2026, 9, 24)) == date(2026, 9, 14)
+
+
+def test_trava_impede_duas_rodadas(tmp_path):
+    primeira = rn.travar(tmp_path)
+    assert primeira is not None and rn.travar(tmp_path) is None
+    primeira.unlink()
+    assert rn.travar(tmp_path) is not None
+
+
+def test_teve_erro():
+    assert not rn.teve_erro({"coleta": {"erros": 0}, "categorizacao": {"gravado": 3}})
+    assert rn.teve_erro({"coleta": {"erro": "portal fora"}})
+    assert rn.teve_erro({"categorizacao": {"erro": "x"}, "coleta": {"erros": 0}})
+
+
+@precisa_banco
+def test_rodada_coleta_e_categoriza_so_os_tipos_liberados(conn, monkeypatch):  # noqa: F811
+    import psycopg
+
+    real = psycopg.connect
+
+    def conectar_como_writer(*a, **kw):
+        c = real(*a, **kw)
+        c.execute("SET ROLE rfb_writer")
+        return c
+
+    monkeypatch.setattr(rn.psycopg, "connect", conectar_como_writer)
+    monkeypatch.setattr(rn.col, "ultima_publicacao", lambda _c: date(2002, 11, 1))
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe sobre a Contribuição", 15123))
+    cfg = {"tipos_categorizar": ["SOLUCAO_CONSULTA"], "coletar_tipos": ["INSTRUCAO_NORMATIVA"],
+           "teto_usd_por_noite": 5.0, "custo_max_ato": 3.0, "limite_atos_por_noite": 10,
+           "paralelo": 2}
+    resumo = rn.rodada(cfg, dsn=DSN, portal=portal, chamar=FalsoModelo(), embed=_vetores,
+                       log=lambda _t: None)
+    assert resumo["coleta"]["gravados"] == 1 and resumo["coleta"]["erros"] == 0
+    # só SOLUCAO_CONSULTA está liberada: a fila é a SC do seed (ato 2, texto curto demais: vai
+    # para revisão), e a IN recém-coletada fica sem análise
+    assert resumo["categorizacao"]["fila"] == 1 and resumo["categorizacao"]["revisar"] == 1
+    assert conn.execute("SELECT analise_completa FROM rfb_atos.ato WHERE id_portal = 15123"
+                        ).fetchone() == (False,)
+    assert conn.execute("SELECT count(*) FROM rfb_atos.ato WHERE id_portal = 15123"
+                        ).fetchone() == (1,)

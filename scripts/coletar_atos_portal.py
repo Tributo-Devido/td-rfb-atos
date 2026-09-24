@@ -384,6 +384,20 @@ def gravar_ato(conn, linha: dict, vigente: dict, original: dict | None, relacion
             "sem_origem": len(sem_origem), "data_vigencia_fim": fim and fim.isoformat()}
 
 
+def ids_na_base(conn, ids: list[int]) -> set[int]:
+    """Quais desses idAto já estão na base — pelo id_portal e, na parte do legado sem id_portal,
+    pelo idAto do link. Duas consultas para a listagem inteira (e não uma por linha)."""
+    if not ids:
+        return set()
+    achados = {r[0] for r in conn.execute(
+        "SELECT id_portal FROM rfb_atos.ato WHERE id_portal = ANY(%s)", (ids,))}
+    if len(achados) < len(set(ids)):
+        achados |= {r[0] for r in conn.execute(
+            "SELECT (regexp_match(link, '/externa/([0-9]+)/'))[1]::int FROM rfb_atos.ato "
+            "WHERE id_portal IS NULL AND link ~ '/externa/[0-9]+/'")} & set(ids)
+    return achados
+
+
 def ja_na_base(conn, linha: dict) -> int | None:
     por_portal = _id_por_portal(conn, linha["id_portal"])
     if por_portal:
@@ -471,7 +485,8 @@ def novos_no_portal(conn, portal, *, desde: date, ate: date | None = None,
         for ano in range(desde.year, ate.year + 1):
             linhas = [x for x in linhas_da_listagem(portal.listagem(valor, ano), None)
                       if x["publicacao"] and x["publicacao"] > desde]
-            faltam = [x for x in linhas if not _id_por_portal(conn, x["idAto"])]
+            na_base = ids_na_base(conn, [x["idAto"] for x in linhas])
+            faltam = [x for x in linhas if x["idAto"] not in na_base]
             if linhas:
                 saida(f"[listagem] {tipo} {ano}: {len(linhas)} publicados desde {desde}, "
                       f"{len(faltam)} fora da base")
