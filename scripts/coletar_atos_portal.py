@@ -523,6 +523,14 @@ def coletar_novos(conn, portal, *, desde: date, aplicar: bool, run_id: str,
                                            run_id=run_id, saida=saida,
                                            rotulo=f"{tipo} {item['cols'][1]}"))
         except Exception as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 406:
+                # o portal lista o ato mas recusa as visões (406 com qualquer Accept, conferido
+                # em 24/09/2026): ato ainda não liberado; tenta de novo na próxima rodada
+                saida(f"[recusado] {tipo} idAto {item['idAto']}: o portal recusa as visões (406)")
+                resultados.append({"alvo": f"{tipo} idAto {item['idAto']}", "tipo": tipo,
+                                   "recusado": 406})
+                continue
             saida(f"[erro] {tipo} idAto {item['idAto']}: {type(e).__name__}: {e}")
             resultados.append({"alvo": f"{tipo} idAto {item['idAto']}", "tipo": tipo,
                                "erro": f"{type(e).__name__}: {e}"})

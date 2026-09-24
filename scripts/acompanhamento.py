@@ -84,8 +84,9 @@ def mensagem(resumo: dict) -> str:
             n["coletados_por_tipo"].items(), key=lambda x: -x[1]))
         linhas.append(f"Coleta: *{n['atos_coletados']}* atos novos"
                       + (f" ({tipos})" if tipos else "")
-                      + (f" · {n['erros_coleta']} recusados pelo portal" if n["erros_coleta"]
-                         else " · 0 erros"))
+                      + (f" · *{n['erros_coleta']} erros*" if n["erros_coleta"] else " · 0 erros")
+                      + (f" · {coleta['recusados']} ainda não liberados pelo portal"
+                         if coleta.get("recusados") else ""))
     cat = resumo.get("categorizacao") or {}
     if cat.get("erro"):
         linhas.append(f"Categorização: *erro* — {cat['erro'][:200]}")

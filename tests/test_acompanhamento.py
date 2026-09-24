@@ -41,7 +41,10 @@ def test_estado_com_erro_e_falha():
     assert ac.numeros(RESUMO)["estado"] == "ok"
     com_erro = {**RESUMO, "coleta": {**RESUMO["coleta"], "erros": 3}}
     assert ac.numeros(com_erro)["estado"] == "com_erro"
-    assert "3 recusados pelo portal" in ac.mensagem(com_erro)
+    assert "*3 erros*" in ac.mensagem(com_erro)
+    recusados = {**RESUMO, "coleta": {**RESUMO["coleta"], "recusados": 13}}
+    assert ac.numeros(recusados)["estado"] == "ok"               # 406 do portal não é erro
+    assert "13 ainda não liberados pelo portal" in ac.mensagem(recusados)
     falhou = {"run_id": "x", "inicio": "2026-09-25T02:00:00", "falhou": "banco fora de alcance"}
     assert ac.numeros(falhou)["estado"] == "falhou"
     assert ":x:" in ac.mensagem(falhou) and "banco fora de alcance" in ac.mensagem(falhou)

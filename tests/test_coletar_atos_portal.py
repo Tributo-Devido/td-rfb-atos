@@ -386,3 +386,24 @@ def test_erro_num_ato_novo_nao_para_os_outros(conn):
     resultados = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True,
                                    run_id="n3", tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
     assert resultados[0].get("ato_id") and "erro" in resultados[1]
+
+
+@precisa_banco
+def test_ato_que_o_portal_recusa_406_nao_conta_como_erro(conn):
+    class Recusa(Exception):
+        response = type("R", (), {"status_code": 406})()
+
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(_linha_html("888", "SRF", "27/11/2002", "x", 88888))
+    original = portal.visao
+
+    def visao(id_portal, nome):
+        if id_portal == 88888:
+            raise Recusa()
+        return original(id_portal, nome)
+
+    portal.visao = visao
+    (r,) = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True, run_id="r406",
+                             tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    assert r["recusado"] == 406 and "erro" not in r

@@ -112,7 +112,8 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                     por_tipo[x.get("tipo") or "?"] = por_tipo.get(x.get("tipo") or "?", 0) + 1
                 resumo["coleta"] = {
                     "desde": desde.isoformat(), "no_portal": len(r), "gravados": len(novos),
-                    "por_tipo": por_tipo, "erros": sum(1 for x in r if x.get("erro"))}
+                    "por_tipo": por_tipo, "erros": sum(1 for x in r if x.get("erro")),
+                    "recusados": sum(1 for x in r if x.get("recusado"))}
             except Exception as e:
                 log(f"[coleta] ERRO {type(e).__name__}: {e}")
                 resumo["coleta"] = {"erro": f"{type(e).__name__}: {e}"}
