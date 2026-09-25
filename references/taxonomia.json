@@ -1,5 +1,5 @@
 {
-  "_versao": "1.1",
+  "_versao": "1.2",
   "_descricao": "Taxonomia controlada para td-rfb-atos. Porte do CARF (taxonomia_controlada_v1) com adições para Soluções de Consulta, Soluções de Divergência, Instruções Normativas, Decretos, Portarias, ADIs e demais atos normativos da Receita Federal.",
   "_regra_geral": "Use APENAS os códigos e valores listados. Se nada se aplicar, use mecanismo '__NOVO_*'.",
   "_aplicavel_a": ["acordao_carf", "solucao_consulta", "solucao_divergencia", "instrucao_normativa", "decreto", "portaria", "ato_declaratorio_interpretativo", "ato_declaratorio_executivo", "ato_declaratorio_normativo", "parecer_normativo", "nota_tecnica", "resolucao", "ordem_servico"],
@@ -435,11 +435,11 @@
         "temas_especificos": [
           { "codigo": "RETENCAO_NA_FONTE.CSRF_SERVICOS", "descricao": "Retenção de CSLL, PIS/Pasep e Cofins por pessoa jurídica de direito privado sobre serviços do rol taxativo da Lei 10.833/2003, arts. 30 a 36, e IN SRF 459/2004: limpeza, conservação, manutenção, segurança, vigilância, transporte de valores, locação de mão de obra, assessoria creditícia e mercadológica, serviços profissionais" },
           { "codigo": "RETENCAO_NA_FONTE.IRRF_SERVICOS", "descricao": "Retenção do imposto de renda por pagador privado sobre serviços prestados por pessoa jurídica (Decreto 9.580/2018 — RIR/2018, arts. 714 a 717): serviços profissionais, limpeza, conservação, segurança, mão de obra. Não é a parcela de IR da IN RFB 1.234/2012" },
-          { "codigo": "RETENCAO_NA_FONTE.ORGAOS_PUBLICOS", "descricao": "Retenção nos pagamentos de órgãos e entidades da administração pública federal (Lei 9.430/1996, art. 64; Lei 10.833/2003, art. 34; IN RFB 1.234/2012) e, só do imposto de renda, por estados, Distrito Federal e municípios" },
+          { "codigo": "RETENCAO_NA_FONTE.ORGAOS_PUBLICOS", "descricao": "Retenção nos pagamentos de órgãos e entidades da administração pública federal (Lei 9.430/1996, art. 64; Lei 10.833/2003, art. 34; IN RFB 1.234/2012) e por estados, Distrito Federal e municípios: imposto de renda, que lhes pertence (CF, arts. 157, I, e 158, I; STF, Tema 1.130; IN RFB 1.234/2012 com a IN RFB 2.145/2023); CSLL, PIS/Pasep e Cofins só com convênio com a RFB (Lei 10.833/2003, art. 33)" },
           { "codigo": "RETENCAO_NA_FONTE.PLANOS_SAUDE", "descricao": "Retenção sobre pagamentos a operadoras de planos de saúde e cooperativas médicas: plano a preço preestabelecido não sofre a retenção do art. 30 da Lei 10.833/2003; custo operacional ou preço pós-estabelecido pode sofrer" },
           { "codigo": "RETENCAO_NA_FONTE.AUTOPECAS", "descricao": "Retenção de PIS/Pasep e Cofins na venda de autopeças (Lei 10.485/2002, art. 3º, §§ 3º e 4º)" },
           { "codigo": "RETENCAO_NA_FONTE.DEDUCAO_RESTITUICAO_RETIDO", "descricao": "Dedução do valor retido na contribuição devida pelo prestador e restituição ou compensação do excedente (Lei 11.727/2008, art. 5º). O retido não gera crédito de insumo para o tomador" },
-          { "codigo": "RETENCAO_NA_FONTE.RETENCAO_INDEVIDA", "descricao": "Retenção indevida ou a maior: serviço fora do rol legal, ente sem previsão legal para reter PIS/Pasep e Cofins (estados e municípios), alíquota ou base errada. É indébito recuperável pelo prestador" }
+          { "codigo": "RETENCAO_NA_FONTE.RETENCAO_INDEVIDA", "descricao": "Retenção indevida ou a maior: serviço fora do rol legal, estado, Distrito Federal ou município que retém CSLL, PIS/Pasep e Cofins sem convênio com a RFB (Lei 10.833/2003, art. 33), alíquota ou base errada. É indébito recuperável pelo prestador — contra quem reteve: sem convênio, o valor não chega à União e a restituição é pedida ao estado ou município, não à RFB" }
         ]
       }
     ],

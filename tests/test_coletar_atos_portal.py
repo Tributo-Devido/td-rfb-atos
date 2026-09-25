@@ -407,3 +407,82 @@ def test_ato_que_o_portal_recusa_406_nao_conta_como_erro(conn):
     (r,) = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True, run_id="r406",
                              tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
     assert r["recusado"] == 406 and "erro" not in r
+
+
+@precisa_banco
+def test_conexao_que_cai_no_meio_e_reaberta_e_o_ato_tentado_de_novo(conn):
+    """Rodada de 25/09/2026: a conexão caiu e todos os atos seguintes falharam em cascata."""
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe", 15123))
+    coleta = psycopg.connect(DSN, autocommit=True)
+    original = portal.visao
+    caiu = []
+
+    def visao(id_portal, nome):
+        if not caiu:
+            caiu.append(True)
+            coleta.close()                      # a rede caiu no meio do ato
+        return original(id_portal, nome)
+
+    portal.visao = visao
+    (r,) = col.coletar_novos(coleta, portal, desde=date(2002, 11, 1), aplicar=True, run_id="rc",
+                             tipos=["INSTRUCAO_NORMATIVA"], espera=0, saida=_mudo,
+                             reconectar=lambda: psycopg.connect(DSN, autocommit=True))
+    assert r.get("ato_id") and "erro" not in r
+    assert conn.execute("SELECT count(*) FROM rfb_atos.ato WHERE id = %s",
+                        (r["ato_id"],)).fetchone()[0] == 1
+
+
+@precisa_banco
+def test_queda_dentro_da_transacao_nao_deixa_ato_pela_metade(conn, monkeypatch):
+    """A queda no meio da gravação desfaz o ato inteiro; a nova tentativa grava uma vez só."""
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe", 15123))
+    coleta = psycopg.connect(DSN, autocommit=True)
+    original = col.cap.aplicar
+    caiu = []
+
+    def aplicar(c, *a, **k):
+        if not caiu:
+            caiu.append(True)
+            c.close()                           # a rede caiu com a linha do ato já inserida
+        return original(c, *a, **k)
+
+    monkeypatch.setattr(col.cap, "aplicar", aplicar)
+    (r,) = col.coletar_novos(coleta, portal, desde=date(2002, 11, 1), aplicar=True, run_id="rt",
+                             tipos=["INSTRUCAO_NORMATIVA"], espera=0, saida=_mudo,
+                             reconectar=lambda: psycopg.connect(DSN, autocommit=True))
+    assert r.get("ato_id") and "erro" not in r
+    assert conn.execute("SELECT count(*) FROM rfb_atos.ato WHERE id_portal = 15123"
+                        ).fetchone()[0] == 1
+
+
+@precisa_banco
+def test_banco_que_nao_volta_encerra_a_coleta_sem_esperar_ato_por_ato(conn):
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe", 15123),
+        _linha_html("248", "SRF", "27/11/2002", "Outra", 15124))
+    coleta = psycopg.connect(DSN, autocommit=True)
+    original = portal.visao
+
+    def visao(id_portal, nome):
+        coleta.close()                          # cai no primeiro ato e não volta
+        return original(id_portal, nome)
+
+    portal.visao = visao
+    tentativas = []
+
+    def reconectar():
+        tentativas.append(1)
+        raise psycopg.OperationalError("sem rota para o host")
+
+    r = col.coletar_novos(coleta, portal, desde=date(2002, 11, 1), aplicar=True, run_id="rf",
+                          tipos=["INSTRUCAO_NORMATIVA"], espera=0, saida=_mudo,
+                          reconectar=reconectar)
+    assert [bool(x.get("erro")) for x in r] == [True, True] and len(tentativas) == 1

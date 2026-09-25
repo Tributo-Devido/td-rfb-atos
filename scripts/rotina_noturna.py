@@ -95,17 +95,27 @@ def janela_de_coleta(ultima: date | None, hoje: date | None = None) -> date:
 
 
 def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
-           portal=None, chamar=None, embed=None, cliente_lote=None, log=print) -> dict:
+           enviar_lote: bool = True, portal=None, chamar=None, embed=None, cliente_lote=None,
+           log=print) -> dict:
     run_id = f"rotina-{time.strftime('%Y%m%dT%H%M%S')}"
     resumo: dict = {"run_id": run_id, "inicio": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    abertas: list = []            # toda conexão da rodada, inclusive as reabertas, fecha no fim
+
+    def conectar():
+        c = psycopg.connect(dsn, autocommit=True, connect_timeout=30)
+        abertas.append(c)
+        return c
+
+    conn = conectar()
+    try:
         if coletar:
             try:
                 desde = janela_de_coleta(col.ultima_publicacao(conn))
                 log(f"[coleta] atos publicados no portal depois de {desde}")
                 r = col.coletar_novos(conn, portal or col.Portal(), desde=desde,
                                       aplicar=not plano, run_id=run_id,
-                                      tipos=cfg.get("coletar_tipos"), saida=log)
+                                      tipos=cfg.get("coletar_tipos"), saida=log,
+                                      reconectar=conectar)
                 novos = [x for x in r if x.get("ato_id") and not x.get("ja_existia")]
                 por_tipo: dict[str, int] = {}
                 for x in novos:
@@ -117,6 +127,8 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
             except Exception as e:
                 log(f"[coleta] ERRO {type(e).__name__}: {e}")
                 resumo["coleta"] = {"erro": f"{type(e).__name__}: {e}"}
+        if conn.closed:          # a coleta perdeu a conexão: a categorização abre outra
+            conn = conectar()
         try:
             cliente = cliente_lote or (None if plano else lc.cliente_anthropic())
             if not plano:
@@ -153,6 +165,10 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                 f"(estimativa conservadora) | teto da noite US$ {cfg['teto_usd_por_noite']:.2f}")
             if plano:
                 resumo["categorizacao"] = {"fila": len(atos)}
+            elif not enviar_lote:
+                # reforço das 04:00 depois de um envio que deu certo: não gasta o teto duas vezes
+                log("[categorização] o lote desta noite já foi enviado: o reforço não manda outro")
+                resumo["categorizacao"] = {"fila": len(atos), "lote_ja_enviado": True}
             else:
                 ids = lc.enviar(atos, cliente, teto_usd=cfg["teto_usd_por_noite"], saida=log)
                 # o que nem vai ao lote (só ementa curta demais) sai da fila, para revisão
@@ -175,6 +191,9 @@ def rodada(cfg: dict, *, dsn: str, coletar: bool = True, plano: bool = False,
                                              if ultima else None)
         except Exception:
             resumo["base_atualizada_ate"] = None
+    finally:
+        for c in abertas:
+            c.close()
     resumo["fim"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     return resumo
 
@@ -193,6 +212,8 @@ def main() -> None:
     p.add_argument("--conferir", action="store_true",
                    help="checagem da manhã: alerta no Slack se a rodada da noite não aconteceu")
     p.add_argument("--painel", action="store_true", help="últimas rodadas registradas no banco")
+    p.add_argument("--reforco", action="store_true",
+                   help="segunda tentativa (04:00): só roda se a rodada de hoje não terminou ok")
     p.add_argument("--dsn")
     args = p.parse_args()
     pasta = _pasta()
@@ -210,6 +231,11 @@ def main() -> None:
         log("[rotina] outra rodada em andamento (rotina.lock): saindo")
         sys.exit(2)
     try:
+        enviar_lote = True
+        if args.reforco:      # depois da trava: nunca mexe no resumo de uma rodada em andamento
+            roda, enviar_lote = precisa_reforco(pasta, log=log)
+            if not roda:
+                return
         cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
         dsn = cn._dsn(args.dsn, not args.plano)
         if not banco_alcancavel(dsn):
@@ -222,16 +248,50 @@ def main() -> None:
                 ac.enviar_slack(ac.mensagem(resumo), log=log)
             sys.exit(1)
         log(f"[rotina] início | config {cfg}")
-        resumo = rodada(cfg, dsn=dsn, coletar=not args.sem_coleta, plano=args.plano, log=log)
+        resumo = rodada(cfg, dsn=dsn, coletar=not args.sem_coleta, plano=args.plano,
+                        enviar_lote=enviar_lote, log=log)
         _guardar(pasta, resumo)
         log(f"[rotina] fim | {json.dumps(resumo, ensure_ascii=False, default=str)[:600]}")
         if not args.plano:
-            with psycopg.connect(dsn, autocommit=True) as conn:
-                ac.registrar(conn, resumo, log=log)
+            try:
+                with psycopg.connect(dsn, autocommit=True, connect_timeout=15) as conn:
+                    ac.registrar(conn, resumo, log=log)
+            except Exception as e:      # banco fora do ar não pode calar o aviso do Slack
+                log(f"[acompanhamento] sem banco para registrar a rodada: {type(e).__name__}")
             ac.enviar_slack(ac.mensagem(resumo), log=log)
         sys.exit(1 if teve_erro(resumo) else 0)
     finally:
         trava.unlink(missing_ok=True)
+
+
+def precisa_reforco(pasta: Path, *, log=print) -> tuple[bool, bool]:
+    """(rodar?, enviar lote?) para a segunda tentativa das 04:00 — chamada já com a trava.
+
+    Roda se a rodada de hoje não existe, não se lê ou não terminou ok; a de antes fica guardada
+    como AAAA-MM-DD-tentativaN.json (a conferência e o painel leem a mais recente). Só manda lote
+    se a etapa de envio da rodada anterior falhou ou nem aconteceu: sem isso, uma coleta com erro
+    depois de um lote enviado gastaria o teto da noite duas vezes (revisão 4-LLM, Codex)."""
+    hoje = pasta / f"{date.today().isoformat()}.json"
+    if not hoje.exists():
+        log("[reforço] nenhuma rodada hoje: rodando")
+        return True, True
+    try:
+        resumo = json.loads(hoje.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        resumo = {"falhou": "resumo ilegível"}
+    estado = ac.numeros(resumo)["estado"]
+    if estado == "ok":
+        log("[reforço] a rodada de hoje terminou ok: nada a fazer")
+        return False, False
+    n = 1
+    while (pasta / f"{date.today().isoformat()}-tentativa{n}.json").exists():
+        n += 1
+    hoje.replace(pasta / f"{date.today().isoformat()}-tentativa{n}.json")
+    cat = resumo.get("categorizacao") or {}
+    enviar = bool(resumo.get("falhou") or not cat or cat.get("erro"))
+    log(f"[reforço] a rodada de hoje terminou {estado}: rodando de novo"
+        + ("" if enviar else " (sem lote novo: o da noite já foi enviado)"))
+    return True, enviar
 
 
 def _guardar(pasta: Path, resumo: dict) -> None:

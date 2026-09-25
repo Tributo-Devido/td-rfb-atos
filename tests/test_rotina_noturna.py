@@ -69,3 +69,27 @@ def test_rodada_coleta_e_categoriza_so_os_tipos_liberados(conn, monkeypatch):  #
                         ).fetchone() == (False,)
     assert conn.execute("SELECT count(*) FROM rfb_atos.ato WHERE id_portal = 15123"
                         ).fetchone() == (1,)
+
+
+def test_reforco_das_4h_so_roda_se_a_rodada_de_hoje_nao_terminou_ok(tmp_path):
+    import json
+    dia = date.today().isoformat()
+    hoje = tmp_path / f"{dia}.json"
+    mudo = lambda _t: None  # noqa: E731
+    assert rn.precisa_reforco(tmp_path, log=mudo) == (True, True)      # nenhuma rodada hoje
+    hoje.write_text(json.dumps({"coleta": {"gravados": 2, "erros": 0},
+                                "categorizacao": {"fila": 3}}), encoding="utf-8")
+    assert rn.precisa_reforco(tmp_path, log=mudo) == (False, False)    # terminou ok
+    # coleta com erro, mas o lote da noite saiu: roda de novo sem mandar outro lote
+    hoje.write_text(json.dumps({"coleta": {"gravados": 2, "erros": 6},
+                                "categorizacao": {"fila": 3, "lotes_enviados": ["b"]}}),
+                    encoding="utf-8")
+    assert rn.precisa_reforco(tmp_path, log=mudo) == (True, False)
+    assert (tmp_path / f"{dia}-tentativa1.json").exists() and not hoje.exists()
+    # a categorização falhou (25/09/2026): roda e manda o lote; a tentativa 1 não é sobrescrita
+    hoje.write_text(json.dumps({"coleta": {"gravados": 2, "erros": 6},
+                                "categorizacao": {"erro": "CredencialAusente"}}), encoding="utf-8")
+    assert rn.precisa_reforco(tmp_path, log=mudo) == (True, True)
+    assert (tmp_path / f"{dia}-tentativa2.json").exists()
+    hoje.write_text("{trunc", encoding="utf-8")                          # resumo ilegível
+    assert rn.precisa_reforco(tmp_path, log=mudo) == (True, True)

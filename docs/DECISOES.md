@@ -492,3 +492,27 @@ plano pré-fixado tratado como retido, ou loteamento puro em `RET_IMOBILIARIO`.
 inventado dentro de um macro válido é gravado e não aparece nas buscas. Validar contra a lista
 canônica (e contar como "fora da taxonomia" no portão) fica para PR própria. Temas menores (IOF,
 parcelamento, tributação internacional, Pilar 2) ficam para uma segunda rodada.
+
+## 2026-09-25 · Rotina resistente a queda de rede (rodada de 25/09 às 02:00)
+
+**Contexto.** Às 02:02 a conexão com o banco caiu no meio da coleta; os 6 atos seguintes falharam
+em cascata na mesma conexão morta, e a leitura da chave Anthropic no SSM falhou 3 min depois com
+"sem credencial" (o motivo real era descartado). O notebook não dormiu; as credenciais funcionam.
+
+**Decisão.** (1) A coleta reabre a conexão quebrada e tenta o ato uma vez; se o banco não volta,
+encerra e deixa o resto para a próxima rodada. (2) A categorização abre conexão própria; todas as
+conexões da rodada fecham no fim. (3) O SSM tenta 3 vezes em erro transitório (não em falta de
+permissão) e a mensagem traz o motivo real. (4) Rodada de reforço às 04:00, só se a de hoje não
+terminou ok, pega a trava antes de tocar no resumo, guarda cada tentativa, e **só manda lote se o
+envio anterior falhou** — senão uma coleta com erro depois de um lote enviado gastaria o teto duas
+vezes. (5) Registro no banco com prazo curto de conexão, sem calar o Slack.
+
+**Alternativas descartadas.** Reforço que repete a noite inteira (proposta inicial; Codex e Grok:
+dobra o gasto); só `tenacity`/keepalive TCP (Gemini: não cobre a queda da VPN); reconectar sem
+limite (Grok: 30 s por ato com o banco fora).
+
+**Não procedeu.** Gravação em dobro na nova tentativa (Gemini): a transação do ato cai inteira e o
+`coletar_item` confere a base antes de gravar; testado com queda dentro da transação.
+
+**Em aberto.** `id_portal` sem `UNIQUE` no banco (Codex) e manifesto `criando` sem `batch_id` que
+expira em 24 h sem alerta — PRs próprias.

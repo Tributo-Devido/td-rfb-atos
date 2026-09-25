@@ -5,6 +5,8 @@ import pytest
 
 import credenciais as cr
 
+_SSM_REAL = cr._ssm              # antes de o fixture trocar pelo falso
+
 
 @pytest.fixture(autouse=True)
 def consultas_ssm(monkeypatch):
@@ -79,3 +81,19 @@ def test_nome_desconhecido_e_erro_de_programacao():
         cr.resolver("nada")
     with pytest.raises(KeyError):
         cr.resolver_dsn("openai")
+
+
+def test_ssm_tenta_de_novo_e_mensagem_traz_o_motivo_real(monkeypatch):
+    """Rodada de 25/09/2026: queda curta de rede virou 'sem credencial' sem dizer por quê."""
+    monkeypatch.setattr(cr, "_ssm", _SSM_REAL)
+    monkeypatch.setattr(cr.time, "sleep", lambda _s: None)
+    respostas = iter([None, "sk-segredo"])
+    monkeypatch.setattr(cr, "_ssm_uma", lambda *_a: next(respostas))
+    assert cr.resolver("anthropic") == "sk-segredo"          # a segunda tentativa entrega
+
+    def sem_rede(parametro, _perfil):
+        cr._ULTIMO_ERRO[parametro] = "aws cli: Could not connect to the endpoint URL"
+
+    monkeypatch.setattr(cr, "_ssm_uma", sem_rede)
+    with pytest.raises(cr.CredencialAusente, match="Could not connect"):
+        cr.resolver("anthropic")
