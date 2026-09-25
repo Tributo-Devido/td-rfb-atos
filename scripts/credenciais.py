@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 
 REGISTRO: dict[str, tuple[str, str, str | None]] = {
     "leitura": ("RFB_ATOS_DSN_LEITURA", "/td/db/ratio-pg-dsn", None),
@@ -42,7 +43,25 @@ def _regiao() -> str:
     return os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-2"
 
 
-def _ssm(parametro: str, perfil: str | None) -> str | None:
+_ULTIMO_ERRO: dict[str, str] = {}      # parâmetro -> motivo da última falha (sem valor)
+
+
+def _ssm(parametro: str, perfil: str | None, *, tentativas: int = 3,
+         espera: float = 10) -> str | None:
+    """Até `tentativas` leituras, com espera crescente: queda curta de rede não vira credencial
+    ausente (rodada de 25/09/2026). O motivo da última falha fica em _ULTIMO_ERRO."""
+    _ULTIMO_ERRO.pop(parametro, None)        # nunca mostrar a falha de uma leitura antiga
+    for i in range(tentativas):
+        valor = _ssm_uma(parametro, perfil)
+        definitivo = any(x in _ULTIMO_ERRO.get(parametro, "")
+                         for x in ("AccessDenied", "ParameterNotFound", "UnrecognizedClient"))
+        if valor or definitivo or i == tentativas - 1:   # sem permissão não passa esperando
+            return valor
+        time.sleep(espera * (i + 1))
+    return None
+
+
+def _ssm_uma(parametro: str, perfil: str | None) -> str | None:
     """Lê um SecureString do SSM; None se não conseguir (sem login AWS, sem permissão, sem rede).
 
     Tenta boto3 (se instalado) e cai para a CLI `aws`, como o `libs/secrets.py`.
@@ -57,18 +76,26 @@ def _ssm(parametro: str, perfil: str | None) -> str | None:
             resp = sessao.client("ssm", region_name=_regiao()).get_parameter(
                 Name=parametro, WithDecryption=True)
             return resp["Parameter"]["Value"].strip() or None
-        except Exception:
-            pass
+        except Exception as e:
+            _ULTIMO_ERRO[parametro] = f"boto3: {type(e).__name__}: {str(e)[:200]}"
     cmd = ["aws", "ssm", "get-parameter", "--name", parametro, "--with-decryption",
            "--region", _regiao(), "--query", "Parameter.Value", "--output", "text"]
     if perfil:
         cmd += ["--profile", perfil]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired) as e:
+        _ULTIMO_ERRO[parametro] = f"aws cli: {type(e).__name__}"
         return None
     valor = r.stdout.strip()
-    return valor if r.returncode == 0 and valor and valor != "None" else None
+    if r.returncode == 0 and valor and valor != "None":
+        return valor
+    # stderr da CLI traz o motivo (sem rede, sem permissão, token expirado), nunca o valor
+    motivo = (r.stderr or "").strip().splitlines()
+    cli = f"aws cli: {motivo[-1][:200] if motivo else f'saída {r.returncode}'}"
+    boto = _ULTIMO_ERRO.get(parametro, "")
+    _ULTIMO_ERRO[parametro] = f"{boto} | {cli}" if boto.startswith("boto3") else cli
+    return None
 
 
 def _buscar(nome: str) -> tuple[str | None, str | None]:
@@ -95,6 +122,7 @@ def resolver(nome: str) -> str:
         raise CredencialAusente(
             f"sem credencial `{nome}`: defina {variavel} ou garanta ssm:GetParameter em "
             f"{parametro}{dica} (região {_regiao()})."
+            + (f" Última falha: {_ULTIMO_ERRO[parametro]}" if parametro in _ULTIMO_ERRO else "")
         )
     return valor
 

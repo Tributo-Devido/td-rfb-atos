@@ -506,9 +506,13 @@ def novos_no_portal(conn, portal, *, desde: date, ate: date | None = None,
 
 def coletar_novos(conn, portal, *, desde: date, aplicar: bool, run_id: str,
                   tipos: list[str] | None = None, limite: int | None = None,
-                  saida=print) -> list[dict]:
+                  reconectar=None, espera: float = 30, saida=print) -> list[dict]:
     """Coleta os atos publicados desde `desde` que faltam na base, do mais antigo ao mais novo. Um
-    ato com erro não para os outros; sem `aplicar`, só lista (não baixa as visões)."""
+    ato com erro não para os outros; sem `aplicar`, só lista (não baixa as visões).
+
+    Com `reconectar` (função que abre conexão nova): se a conexão cai no meio (rede ou VPN, como
+    na rodada de 25/09/2026), espera `espera` segundos, reabre e tenta o ato uma vez mais — sem
+    isso, todos os atos seguintes falhavam com "the connection is closed"."""
     novos = novos_no_portal(conn, portal, desde=desde, tipos=tipos, saida=saida)
     novos.sort(key=lambda x: (x[1]["publicacao"], x[1]["idAto"]))
     if limite:
@@ -517,11 +521,33 @@ def coletar_novos(conn, portal, *, desde: date, aplicar: bool, run_id: str,
         return [{"alvo": f"{t} {x['cols'][1]} (idAto {x['idAto']})", "plano": True}
                 for t, x in novos]
     resultados = []
+    fora_do_ar = None
     for tipo, item in novos:
+        if fora_do_ar:
+            resultados.append({"alvo": f"{tipo} idAto {item['idAto']}", "tipo": tipo,
+                               "erro": fora_do_ar})
+            continue
         try:
-            resultados.append(coletar_item(conn, tipo, item, portal, aplicar=True,
-                                           run_id=run_id, saida=saida,
-                                           rotulo=f"{tipo} {item['cols'][1]}"))
+            try:
+                resultados.append(coletar_item(conn, tipo, item, portal, aplicar=True,
+                                               run_id=run_id, saida=saida,
+                                               rotulo=f"{tipo} {item['cols'][1]}"))
+            except psycopg.OperationalError as e:
+                if reconectar is None or not (conn.closed or conn.broken):
+                    raise
+                saida(f"[coleta] a conexão com o banco caiu ({type(e).__name__}); reabrindo em "
+                      f"{espera:.0f} s e tentando {tipo} idAto {item['idAto']} de novo")
+                time.sleep(espera)
+                try:
+                    conn = reconectar()   # a transação do ato caiu junto: nada ficou pela metade
+                except Exception as e2:
+                    # banco segue fora: não espera de novo a cada ato — o resto fica para amanhã
+                    fora_do_ar = f"banco fora do ar na coleta: {type(e2).__name__}"
+                    saida(f"[coleta] {fora_do_ar}; os atos restantes ficam para a próxima rodada")
+                    raise
+                resultados.append(coletar_item(conn, tipo, item, portal, aplicar=True,
+                                               run_id=run_id, saida=saida,
+                                               rotulo=f"{tipo} {item['cols'][1]}"))
         except Exception as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status == 406:

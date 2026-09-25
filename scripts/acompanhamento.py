@@ -153,8 +153,9 @@ def registrar(conn, resumo: dict, *, log=print) -> bool:
 
 
 def ultima_rodada(pasta: Path) -> tuple[datetime | None, dict | None]:
-    """A rodada mais recente pelos resumos do disco (rotina/AAAA-MM-DD.json)."""
-    arquivos = sorted(pasta.glob("????-??-??.json"))
+    """A rodada mais recente pelos resumos do disco (rotina/AAAA-MM-DD.json, e as tentativas
+    AAAA-MM-DD-tentativaN.json do reforço, que o nome põe antes da rodada do mesmo dia)."""
+    arquivos = sorted(pasta.glob("????-??-??*.json"))
     if not arquivos:
         return None, None
     resumo = json.loads(arquivos[-1].read_text(encoding="utf-8"))
