@@ -343,7 +343,9 @@ def test_ato_ja_na_base_com_outra_grafia_de_orgao_nao_e_duplicado(conn):
                  "VALUES ('INSTRUCAO_NORMATIVA', '1911', 2019, 'SRF', '2019-10-15')")
     (r,) = col.coletar(conn, ("INSTRUCAO_NORMATIVA", "1911", 2019), PortalFalso(), aplicar=True,
                        run_id="c1", saida=_mudo)
-    assert r["ja_existia"]
+    # sem texto, sem id_portal e sem link: não há como provar que é o mesmo ato — nem completa nem
+    # duplica; fica marcado como ambíguo (revisão 4-LLM de 26/09/2026)
+    assert r.get("ambiguo")
     assert _um(conn, "SELECT count(*) FROM rfb_atos.ato WHERE numero = '1911'") == (1,)
 
 
@@ -486,3 +488,98 @@ def test_banco_que_nao_volta_encerra_a_coleta_sem_esperar_ato_por_ato(conn):
                           tipos=["INSTRUCAO_NORMATIVA"], espera=0, saida=_mudo,
                           reconectar=reconectar)
     assert [bool(x.get("erro")) for x in r] == [True, True] and len(tentativas) == 1
+
+
+
+@precisa_banco
+def test_registro_so_com_a_listagem_e_completado_e_nao_duplicado(conn):
+    """25/09/2026: outro processo inseriu atos só com a listagem (sem texto nem id_portal); a coleta
+    os tratava como "na base" pelo link e eles ficavam sem texto para sempre."""
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe", 15123))
+    vazio = conn.execute(
+        "INSERT INTO rfb_atos.ato (tipo_ato, numero, ano, emissor, data_publicacao, ementa, link, "
+        "content_disponivel, analise_completa, importado_de) VALUES ('INSTRUCAO_NORMATIVA', '247', "
+        "2002, 'SRF_LISTAGEM', '2002-11-26', 'ementaGrudada', 'http://x/#/consulta/externa/15123/vs/"
+        "abc', false, false, 'sijut2_rfb') RETURNING id").fetchone()[0]
+    assert 15123 not in col.ids_na_base(conn, [15123])     # sem texto não conta como "na base"
+    (r,) = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True, run_id="cp",
+                             tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    assert r["ato_id"] == vazio and r.get("completado")
+    linha = conn.execute("SELECT id_portal, content_disponivel, importado_de, ementa FROM "
+                         "rfb_atos.ato WHERE id = %s", (vazio,)).fetchone()
+    assert linha[:3] == (15123, True, "recoleta_portal") and linha[3] != "ementaGrudada"
+    assert conn.execute("SELECT count(*) FROM rfb_atos.ato WHERE tipo_ato = 'INSTRUCAO_NORMATIVA' "
+                        "AND numero = '247' AND ano = 2002").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM rfb_atos.ato_mudanca WHERE ato_id = %s AND "
+                        "campo = 'completado'", (vazio,)).fetchone()[0] == 1
+
+
+@precisa_banco
+def test_ade_de_outra_unidade_com_mesmo_numero_e_data_nao_e_o_mesmo_ato(conn):
+    """26/09/2026: ADE é numerado por unidade; 18 pares de ADEs diferentes com o mesmo número e
+    a mesma data. O registro com id_portal de outro ato não pode fazer o novo parecer "na base"."""
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe", 15123))
+    outro = conn.execute(
+        "INSERT INTO rfb_atos.ato (tipo_ato, numero, ano, emissor, data_publicacao, id_portal, "
+        "content_disponivel) VALUES ('INSTRUCAO_NORMATIVA', '247', 2002, 'OUTRA_UNIDADE', "
+        "'2002-11-26', 999999, true) RETURNING id").fetchone()[0]
+    (r,) = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True, run_id="ade",
+                             tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    assert r.get("ato_id") and r["ato_id"] != outro and not r.get("ja_existia")
+
+
+def _stub(conn, *, numero="247", emissor="SRF_LISTAGEM", link=None, id_portal=None, texto=False,
+          tipo="INSTRUCAO_NORMATIVA", data="2002-11-26"):
+    return conn.execute(
+        "INSERT INTO rfb_atos.ato (tipo_ato, numero, ano, emissor, data_publicacao, link, "
+        "id_portal, content_disponivel, analise_completa, importado_de) VALUES (%s, %s, 2002, %s, "
+        "%s, %s, %s, %s, false, 'sijut2_rfb') RETURNING id",
+        (tipo, numero, emissor, data, link, id_portal, texto)).fetchone()[0]
+
+
+def _coletar_247(conn, run_id):
+    portal = PortalFalso()
+    del portal.listagens[(IN, 2019)]
+    portal.listagens[(IN, 2002)] = _listagem(
+        _linha_html("247", "SRF", "26/11/2002", "Dispõe", 15123))
+    (r,) = col.coletar_novos(conn, portal, desde=date(2002, 11, 1), aplicar=True, run_id=run_id,
+                             tipos=["INSTRUCAO_NORMATIVA"], saida=_mudo)
+    return r
+
+
+@precisa_banco
+def test_completa_o_registro_do_link_exato_e_nao_o_outro_da_mesma_chave(conn):
+    outro = _stub(conn, emissor="OUTRO", texto=True)            # com texto, sem link
+    vazio = _stub(conn, link="http://x/#/consulta/externa/15123/vs/a")
+    r = _coletar_247(conn, "f1")
+    assert r["ato_id"] == vazio and r.get("completado")
+    assert conn.execute("SELECT id_portal FROM rfb_atos.ato WHERE id = %s",
+                        (outro,)).fetchone() == (None,)
+
+
+@precisa_banco
+def test_registro_com_id_portal_e_sem_texto_e_completado(conn):
+    vazio = _stub(conn, id_portal=15123)
+    assert 15123 not in col.ids_na_base(conn, [15123])
+    r = _coletar_247(conn, "f2")
+    assert r["ato_id"] == vazio and r.get("completado")
+    antes = conn.execute("SELECT antes->>'importado_de', depois->>'importado_de' FROM "
+                         "rfb_atos.ato_mudanca WHERE ato_id = %s AND campo = 'completado'",
+                         (vazio,)).fetchone()
+    assert antes == ("sijut2_rfb", "recoleta_portal")          # auditoria restaura a origem
+
+
+@precisa_banco
+def test_ade_sem_link_nunca_casa_pela_chave_natural(conn):
+    ade = {"tipo_ato": "ATO_DECLARATORIO_EXECUTIVO", "numero": "7", "id_portal": 555,
+           "data_publicacao": date(2002, 11, 26)}
+    _stub(conn, tipo="ATO_DECLARATORIO_EXECUTIVO", numero="7", emissor="ALF_A", texto=True)
+    _stub(conn, tipo="ATO_DECLARATORIO_EXECUTIVO", numero="7", emissor="DRF_B")
+    assert col.ja_na_base(conn, ade) is None and col.registro_ambiguo(conn, ade) is None
+    assert col.registro_sem_texto(conn, 555) is None      # nada prova que algum deles é o 555
