@@ -516,3 +516,28 @@ limite (Grok: 30 s por ato com o banco fora).
 
 **Em aberto.** `id_portal` sem `UNIQUE` no banco (Codex) e manifesto `criando` sem `batch_id` que
 expira em 24 h sem alerta — PRs próprias.
+
+## 2026-09-26 · Coleta completa os registros sem texto — só por identidade forte
+
+**Contexto.** Um processo externo (origem `sijut2_rfb`, fora desta máquina; investigação em
+andamento) insere atos só com a linha da listagem: sem texto e sem `id_portal`. Em 25/09 foram 59.
+A coleta os tratava como "na base" pelo link, e eles ficavam sem texto para sempre (os 6 SCs que
+falharam na rodada de 25/09 caíram nisso). A análise mostrou ainda que a chave natural sem emissor
+(tipo, número, data) casava **ADEs de unidades diferentes**: 18 pares, todos atos distintos — não
+são duplicatas.
+
+**Decisão.** "Na base" é só registro **com texto**. Registro sem texto é completado (id_portal,
+ementa, link, emissor quando não colide, origem — tudo em `ato_mudanca`) apenas por identidade
+forte: `id_portal` igual ou o idAto exato no link. A chave natural só serve para pular legado com
+texto, sem `id_portal`, sem link para outro ato, e nunca para ADE. Legado sem texto e sem link com a
+mesma chave vira `[ambíguo]`: nem completa nem insere.
+
+**Alternativas descartadas.** Completar pela chave natural (primeira versão; Codex, Gemini e Grok:
+funde atos de unidades diferentes); inserir sempre que não houver `id_portal` (duplicaria o legado);
+apagar as "duplicatas" (não eram duplicatas).
+
+**Teste de falsificação.** Cai se um ato completado aparecer com texto de outro ato (ementa ×
+órgão), ou se surgir um segundo registro para o mesmo idAto depois da coleta.
+
+**Em aberto.** `id_portal` sem `UNIQUE` (índice único parcial depois de auditar); o processo externo
+pode reinserir o stub depois de completado — a correção de verdade é nele.

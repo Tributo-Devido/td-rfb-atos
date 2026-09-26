@@ -39,7 +39,7 @@ import os
 import re
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -253,14 +253,18 @@ _LEGADO_POR_LINK: dict[int, int] | None = None
 
 def _legado_por_link(conn) -> dict[int, int]:
     """idAto -> ato.id da parte da base importada sem id_portal (o idAto só está no link). Lido uma
-    vez por processo: linha nova sempre tem id_portal, então este mapa não muda na rodada."""
+    vez por processo: linha nova sempre tem id_portal, então este mapa não muda na rodada.
+
+    Só entra linha COM texto: outro processo (origem 'sijut2_rfb', 25/09/2026) insere atos só com a
+    linha da listagem — sem texto nem id_portal —, e contá-los como "na base" deixava o ato para
+    sempre sem texto. Esses a coleta completa (`coletar_item`)."""
     global _LEGADO_POR_LINK
     if _LEGADO_POR_LINK is None:
         _LEGADO_POR_LINK = {}
         for id_ato, ato_id in conn.execute(
                 "SELECT (regexp_match(link, '/externa/([0-9]+)/'))[1]::int, id "
                 "FROM rfb_atos.ato WHERE id_portal IS NULL AND link ~ '/externa/[0-9]+/' "
-                "ORDER BY id DESC"):
+                "AND content_disponivel ORDER BY id DESC"):
             _LEGADO_POR_LINK[id_ato] = ato_id
     return _LEGADO_POR_LINK
 
@@ -350,13 +354,51 @@ SQL_ATO = (
     "'sijut2_rfb', 'recoleta_portal', now()) RETURNING id")
 
 
+# campos que o portal corrige num registro criado só com a linha da listagem
+CAMPOS_COMPLETAR = ("id_portal", "ementa", "link", "url_html", "eficacia_atual", "pdf_disponivel",
+                    "emissor", "importado_de", "importado_em")
+
+
 def gravar_ato(conn, linha: dict, vigente: dict, original: dict | None, relacional: dict,
-               inicio_do_revogador: dict[int, date | None], *, run_id: str, origem: str) -> dict:
-    """Um ato numa transação: linha, texto (carregar_ato_portal), relações e fim de vigência."""
+               inicio_do_revogador: dict[int, date | None], *, run_id: str, origem: str,
+               completar_id: int | None = None) -> dict:
+    """Um ato numa transação: linha, texto (carregar_ato_portal), relações e fim de vigência.
+
+    Com `completar_id`, não insere: completa o registro que já existe sem texto e sem id_portal
+    (criado por outro processo só com a listagem), sem criar um segundo ato."""
     with conn.transaction():
-        ato_id = conn.execute(SQL_ATO, linha).fetchone()[0]
-        _mudanca(conn, run_id, ato_id, "ato", "criado", None,
-                 {k: (v.isoformat() if isinstance(v, date) else v) for k, v in linha.items()})
+        if completar_id is None:
+            ato_id = conn.execute(SQL_ATO, linha).fetchone()[0]
+            _mudanca(conn, run_id, ato_id, "ato", "criado", None,
+                     {k: (v.isoformat() if isinstance(v, date) else v) for k, v in linha.items()})
+        else:
+            antes = conn.execute(
+                f"SELECT {', '.join(CAMPOS_COMPLETAR)} FROM rfb_atos.ato WHERE id = %s "
+                "AND NOT content_disponivel FOR UPDATE", (completar_id,)).fetchone()
+            if antes is None:
+                raise RuntimeError(f"ato {completar_id} deixou de estar sem texto: não completo")
+            depois = {c: linha[c] for c in CAMPOS_COMPLETAR[:6]}
+            # o emissor do portal só entra se não colidir com outro registro (UNIQUE da chave
+            # natural): se colidir, é duplicata de verdade e fica o emissor antigo, para revisão
+            colide = conn.execute(
+                "SELECT 1 FROM rfb_atos.ato WHERE id <> %s AND tipo_ato = %s AND numero = %s "
+                "AND emissor = %s AND data_publicacao = %s",
+                (completar_id, linha["tipo_ato"], linha["numero"], linha["emissor"],
+                 linha["data_publicacao"])).fetchone()
+            depois["emissor"] = antes[CAMPOS_COMPLETAR.index("emissor")] if colide \
+                else linha["emissor"]
+            depois["importado_de"] = "recoleta_portal"
+            linha_upd = conn.execute(
+                "UPDATE rfb_atos.ato SET " + ", ".join(f"{c} = %({c})s" for c in depois)
+                + ", importado_em = now() WHERE id = %(id)s RETURNING importado_em",
+                {**depois, "id": completar_id}).fetchone()
+            depois["importado_em"] = linha_upd[0]
+            ato_id = completar_id
+            _mudanca(conn, run_id, ato_id, "ato", "completado",
+                     {c: (v.isoformat() if isinstance(v, (date, datetime)) else v)
+                      for c, v in zip(CAMPOS_COMPLETAR, antes, strict=True)},
+                     {c: (v.isoformat() if isinstance(v, (date, datetime)) else v)
+                      for c, v in depois.items()})
         resumo = cap.aplicar(conn, ato_id, vigente, original, run_id=run_id,
                              origem_vigente=origem, permitir_anexo_pdf=True)
         ligadas = ligar_pendentes(conn, ato_id, linha["id_portal"], run_id)
@@ -404,21 +446,63 @@ def ids_na_base(conn, ids: list[int]) -> set[int]:
     if not ids:
         return set()
     achados = {r[0] for r in conn.execute(
-        "SELECT id_portal FROM rfb_atos.ato WHERE id_portal = ANY(%s)", (ids,))}
+        "SELECT id_portal FROM rfb_atos.ato WHERE id_portal = ANY(%s) AND content_disponivel",
+        (ids,))}
     return achados | (set(_legado_por_link(conn)) & set(ids))
 
 
+# tipos numerados por unidade da Receita: número + data não identificam o ato (26/09/2026, 18
+# pares de ADEs diferentes com o mesmo número e a mesma data)
+NUMERADOS_POR_UNIDADE = frozenset({"ATO_DECLARATORIO_EXECUTIVO",
+                                   "ATO_DECLARATORIO_EXECUTIVO_CONJUNTO"})
+
+
 def ja_na_base(conn, linha: dict) -> int | None:
-    por_portal = _id_por_portal(conn, linha["id_portal"])
-    if por_portal:
+    """Registro COM texto que já é este ato: pelo id_portal/link e, no legado sem id_portal, pela
+    chave natural (sem o emissor, cuja grafia varia; a data separa a retificação). A chave natural
+    nunca casa com registro que aponte para outro idAto nem com tipo numerado por unidade."""
+    por_portal = _id_com_texto(conn, linha["id_portal"])
+    if por_portal or linha["tipo_ato"] in NUMERADOS_POR_UNIDADE:
         return por_portal
-    # chave natural da base, sem o emissor (a grafia do órgão varia no legado); a data separa o ato
-    # da retificação dele, que tem o mesmo número e ano
     achado = conn.execute(
         "SELECT id FROM rfb_atos.ato WHERE tipo_ato = %s "
-        "AND regexp_replace(numero, '\\D', '', 'g') = %s AND data_publicacao = %s",
+        "AND regexp_replace(numero, '\\D', '', 'g') = %s AND data_publicacao = %s "
+        "AND content_disponivel AND id_portal IS NULL AND (link IS NULL "
+        "     OR link !~ '/externa/[0-9]+/' "
+        "     OR (regexp_match(link, '/externa/([0-9]+)/'))[1]::int = %s) "
+        "ORDER BY id LIMIT 1",
+        (linha["tipo_ato"], linha["numero"], linha["data_publicacao"],
+         linha["id_portal"])).fetchone()
+    return achado[0] if achado else None
+
+
+def _id_com_texto(conn, id_ato: int) -> int | None:
+    linha = conn.execute("SELECT id FROM rfb_atos.ato WHERE id_portal = %s AND content_disponivel "
+                         "ORDER BY id LIMIT 1", (id_ato,)).fetchone()
+    return linha[0] if linha else _legado_por_link(conn).get(id_ato)
+
+
+def registro_ambiguo(conn, linha: dict) -> int | None:
+    """Legado sem texto com a mesma chave natural e sem link que prove de que ato é."""
+    if linha["tipo_ato"] in NUMERADOS_POR_UNIDADE:
+        return None
+    achado = conn.execute(
+        "SELECT id FROM rfb_atos.ato WHERE tipo_ato = %s "
+        "AND regexp_replace(numero, '\\D', '', 'g') = %s AND data_publicacao = %s "
+        "AND NOT content_disponivel AND id_portal IS NULL "
+        "AND (link IS NULL OR link !~ '/externa/[0-9]+/') ORDER BY id LIMIT 1",
         (linha["tipo_ato"], linha["numero"], linha["data_publicacao"])).fetchone()
     return achado[0] if achado else None
+
+
+def registro_sem_texto(conn, id_ato: int) -> int | None:
+    """Registro deste idAto ainda sem texto — identidade forte: o id_portal ou o idAto exato no
+    link. Nunca pela chave natural (revisão 4-LLM de 26/09/2026: casaria ato de outra unidade)."""
+    linha = conn.execute(
+        "SELECT id FROM rfb_atos.ato WHERE NOT content_disponivel AND (id_portal = %s OR "
+        "(id_portal IS NULL AND (regexp_match(link, '/externa/([0-9]+)/'))[1]::int = %s)) "
+        "ORDER BY id_portal IS NULL, id LIMIT 1", (id_ato, id_ato)).fetchone()
+    return linha[0] if linha else None
 
 
 def coletar(conn, alvo: tuple[str, str, int], portal, *, aplicar: bool, run_id: str,
@@ -438,20 +522,28 @@ def coletar_item(conn, tipo: str, item: dict, portal, *, aplicar: bool, run_id: 
                  saida=print, rotulo: str | None = None) -> dict:
     """Um ato da listagem do portal: plano ou gravação. Ato já na base é pulado."""
     rotulo = f"{rotulo or tipo} (idAto {item['idAto']})"
-    existente = _id_por_portal(conn, item["idAto"])   # antes de baixar: não gasta o portal
+    existente = _id_com_texto(conn, item["idAto"])    # antes de baixar: não gasta o portal
     if existente:
         saida(f"[já na base] {rotulo}: ato {existente}")
         return {"alvo": rotulo, "tipo": tipo, "ato_id": existente, "ja_existia": True}
+    # registro só com a listagem (outro processo, origem 'sijut2_rfb'): completa em vez de duplicar
+    completar = registro_sem_texto(conn, item["idAto"])
     vigente = portal.visao(item["idAto"], "vigente")
     relacional = portal.visao(item["idAto"], "relacional") or {}
     if not vigente:
         saida(f"[erro] {rotulo}: visão vigente indisponível")
         return {"alvo": rotulo, "tipo": tipo, "erro": "visão vigente indisponível"}
     linha = linha_ato(tipo, item, vigente)
-    existente = ja_na_base(conn, linha)
+    existente = None if completar else ja_na_base(conn, linha)
     if existente:
         saida(f"[já na base] {rotulo}: ato {existente}")
         return {"alvo": rotulo, "tipo": tipo, "ato_id": existente, "ja_existia": True}
+    duvida = None if completar else registro_ambiguo(conn, linha)
+    if duvida:
+        # legado sem texto, sem id_portal e sem link: pode ser este ato ou outro — nem completa
+        # (fundiria atos) nem insere (duplicaria); fica para conferência humana
+        saida(f"[ambíguo] {rotulo}: ato {duvida} tem a mesma chave natural, sem link nem texto")
+        return {"alvo": rotulo, "tipo": tipo, "ato_id": duvida, "ambiguo": True}
     revogadores = {imp["idAto"] for imp in relacional.get("impactosPoloAtivo") or []
                    if imp.get("sigla") == "REV" and imp.get("idAto")}
     inicio = {}
@@ -471,9 +563,9 @@ def coletar_item(conn, tipo: str, item: dict, portal, *, aplicar: bool, run_id: 
         return {"alvo": rotulo, "tipo": tipo, "plano": True, "caracteres": len(texto)}
     original = portal.visao(item["idAto"], "original")
     resumo = gravar_ato(conn, linha, vigente, original, relacional, inicio, run_id=run_id,
-                        origem=f"{cap.API}/{item['idAto']}/visao/vigente")
-    saida(f"[ok] {rotulo}: {resumo}")
-    return {"alvo": rotulo, "tipo": tipo, **resumo}
+                        origem=f"{cap.API}/{item['idAto']}/visao/vigente", completar_id=completar)
+    saida(f"[{'completado' if completar else 'ok'}] {rotulo}: {resumo}")
+    return {"alvo": rotulo, "tipo": tipo, **resumo, **({"completado": True} if completar else {})}
 
 
 def tipos_do_portal() -> list[str]:
